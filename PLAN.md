@@ -502,7 +502,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 13 | 🔸 | Rust `submitter` | On-chain tx submission (scaffolded) |
 | 14 | 🔸 | Rust `api` | REST API + Prometheus metrics (endpoints done, metrics pending) |
 | 15 | ⬜ | Rust integration tests | End-to-end pipeline tests |
-| 16 | ⬜ | `Deploy.s.sol` | Deployment script |
+| 16 | ✅ | `Deploy.s.sol` | Deployment script |
 | 17 | ⬜ | Dune queries | Analytics SQL |
 
 ### Progress Notes
@@ -562,6 +562,29 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - **Total: 119 tests passing** (47 Rust + 62 Solidity + 10 service)
 - Cross-language validation: Rust generates SSZ Merkle proofs → Solidity verifies them on-chain
 - Next: Steps 11-14 (Rust service polish) or Step 16 (Deploy.s.sol)
+
+**2026-02-12 (late evening):** Step 16 completed - Deployment script + tests
+- Created `script/Deploy.s.sol`:
+  - UUPS proxy deployment with ERC1967Proxy
+  - Environment variable configuration (MAX_EPOCH, REWARD_AMOUNT, MIN_CLAIM_DELAY, INITIAL_FUNDING)
+  - Owner initialization via initialize() call
+  - Optional initial funding during deployment
+  - Comprehensive deployment verification output
+- Created `test/Deploy.t.sol` with 6 tests:
+  - Deployment without/with funding
+  - Cannot reinitialize (initializer guard)
+  - Upgradeability (UUPS upgrade flow)
+  - Only owner can upgrade (access control)
+  - Proxy points to implementation (ERC1967 slot check)
+- Created `contracts/DEPLOYMENT.md`:
+  - Complete deployment guide for Gnosis Chain
+  - Dry run, broadcast, verify workflow
+  - Post-deployment verification steps
+  - Admin functions (withdraw, upgrade, transfer ownership)
+  - Security checklist
+  - Troubleshooting guide
+- 68 Solidity tests passing total (40 SSZMerkleVerifier + 22 integration + 6 deployment)
+- Next: Step 15 (Rust integration tests) or Step 17 (Dune queries)
 
 **2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
 - **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
