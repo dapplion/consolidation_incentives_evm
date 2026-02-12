@@ -1,0 +1,27 @@
+[package]
+name = "proof-gen"
+description = "SSZ proof generation for Gnosis consolidation incentives"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["gnosis"]
+gnosis = []
+minimal = []
+
+[dependencies]
+ssz_rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex = { workspace = true, features = ["serde"] }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,22 @@
+[package]
+name = "test-vectors"
+description = "Test vector generator for consolidation incentives Solidity tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "generate-test-vectors"
+path = "src/main.rs"
+
+[dependencies]
+proof-gen = { path = "../proof-gen", features = ["minimal"] }
+
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true

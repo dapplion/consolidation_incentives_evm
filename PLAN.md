@@ -491,8 +491,8 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 2 | ✅ | `SSZMerkleVerifier.sol` | Proof verification library |
 | 3 | ✅ | `ConsolidationIncentives.sol` | Main contract |
 | 4 | ✅ | `MockBeaconRootsOracle.sol` | Test mock for EIP-4788 |
-| 5 | ⬜ | Rust workspace scaffolding | Cargo workspace, deps |
-| 6 | ⬜ | `proof-gen` types + gindex | SSZ types, gindex computation |
+| 5 | ✅ | Rust workspace scaffolding | Cargo workspace, deps |
+| 6 | ✅ | `proof-gen` types + gindex | SSZ types, gindex computation |
 | 7 | ⬜ | `proof-gen` proof generation | Proof computation using ssz_rs |
 | 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
 | 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
@@ -513,3 +513,13 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - Using `via_ir = true` in foundry.toml to avoid stack-too-deep
 - Contracts: SSZMerkleVerifier.sol (proof verification), ConsolidationIncentives.sol (main), MockBeaconRootsOracle.sol (test mock)
 - Next: Rust workspace scaffolding (Step 5)
+
+**2026-02-12:** Rust workspace scaffolding complete
+- Steps 5-6 completed
+- Created Cargo workspace with 3 crates: proof-gen, service, test-vectors
+- proof-gen: SSZ types (Validator, PendingConsolidation, BeaconBlockHeader), gindex calculation, beacon client, proof bundle types
+- service: REST API (health/status/consolidations/metrics), scanner and submitter stubs
+- test-vectors: placeholder binary for generating JSON test vectors
+- 24 Rust tests passing + 40 Solidity tests still passing
+- Key dependencies: ssz_rs, alloy, axum, tokio, reqwest
+- Next: proof-gen proof generation using ssz_rs (Step 7)
