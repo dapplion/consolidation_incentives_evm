@@ -485,22 +485,31 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 
 ## Implementation Order
 
-| # | Component | Description |
-|---|---|---|
-| 1 | Foundry scaffolding | Project init, deps, config |
-| 2 | `SSZMerkleVerifier.sol` | Proof verification library |
-| 3 | `ConsolidationIncentives.sol` | Main contract |
-| 4 | `MockBeaconRootsOracle.sol` | Test mock for EIP-4788 |
-| 5 | Rust workspace scaffolding | Cargo workspace, deps |
-| 6 | `proof-gen` types + gindex | SSZ types, gindex computation |
-| 7 | `proof-gen` proof generation | Proof computation using ssz_rs |
-| 8 | `test-vectors` binary | Generate JSON test vectors |
-| 9 | Solidity tests (load vectors) | All tests listed above, 100% coverage |
-| 10 | `SSZMerkleVerifier.t.sol` | Proof library unit tests |
-| 11 | Rust `beacon_client` | Beacon API HTTP client |
-| 12 | Rust `scanner` | Consolidation detection loop |
-| 13 | Rust `submitter` | On-chain tx submission |
-| 14 | Rust `api` | REST API + Prometheus metrics |
-| 15 | Rust integration tests | End-to-end pipeline tests |
-| 16 | `Deploy.s.sol` | Deployment script |
-| 17 | Dune queries | Analytics SQL |
+| # | Status | Component | Description |
+|---|---|---|---|
+| 1 | ✅ | Foundry scaffolding | Project init, deps, config |
+| 2 | ✅ | `SSZMerkleVerifier.sol` | Proof verification library |
+| 3 | ✅ | `ConsolidationIncentives.sol` | Main contract |
+| 4 | ✅ | `MockBeaconRootsOracle.sol` | Test mock for EIP-4788 |
+| 5 | ⬜ | Rust workspace scaffolding | Cargo workspace, deps |
+| 6 | ⬜ | `proof-gen` types + gindex | SSZ types, gindex computation |
+| 7 | ⬜ | `proof-gen` proof generation | Proof computation using ssz_rs |
+| 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
+| 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
+| 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
+| 11 | ⬜ | Rust `beacon_client` | Beacon API HTTP client |
+| 12 | ⬜ | Rust `scanner` | Consolidation detection loop |
+| 13 | ⬜ | Rust `submitter` | On-chain tx submission |
+| 14 | ⬜ | Rust `api` | REST API + Prometheus metrics |
+| 15 | ⬜ | Rust integration tests | End-to-end pipeline tests |
+| 16 | ⬜ | `Deploy.s.sol` | Deployment script |
+| 17 | ⬜ | Dune queries | Analytics SQL |
+
+### Progress Notes
+
+**2025-02-12:** Initial Solidity implementation complete
+- Steps 1-4 and 10 completed
+- 40 tests passing (25 SSZMerkleVerifier + 15 ConsolidationIncentives)
+- Using `via_ir = true` in foundry.toml to avoid stack-too-deep
+- Contracts: SSZMerkleVerifier.sol (proof verification), ConsolidationIncentives.sol (main), MockBeaconRootsOracle.sol (test mock)
+- Next: Rust workspace scaffolding (Step 5)
