@@ -497,10 +497,10 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
 | 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
-| 11 | ⬜ | Rust `beacon_client` | Beacon API HTTP client |
-| 12 | ⬜ | Rust `scanner` | Consolidation detection loop |
-| 13 | ⬜ | Rust `submitter` | On-chain tx submission |
-| 14 | ⬜ | Rust `api` | REST API + Prometheus metrics |
+| 11 | 🔸 | Rust `beacon_client` | Beacon API HTTP client (structure done, needs testing) |
+| 12 | 🔸 | Rust `scanner` | Consolidation detection loop (scaffolded) |
+| 13 | 🔸 | Rust `submitter` | On-chain tx submission (scaffolded) |
+| 14 | 🔸 | Rust `api` | REST API + Prometheus metrics (endpoints done, metrics pending) |
 | 15 | ⬜ | Rust integration tests | End-to-end pipeline tests |
 | 16 | ⬜ | `Deploy.s.sol` | Deployment script |
 | 17 | ⬜ | Dune queries | Analytics SQL |
@@ -513,6 +513,21 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - Using `via_ir = true` in foundry.toml to avoid stack-too-deep
 - Contracts: SSZMerkleVerifier.sol (proof verification), ConsolidationIncentives.sol (main), MockBeaconRootsOracle.sol (test mock)
 - Next: Rust workspace scaffolding (Step 5)
+
+**2026-02-12:** Rust workspace scaffolding complete (Steps 5-6 + partial 11-14)
+- Created `prover/` Cargo workspace with 3 crates:
+  - `proof-gen`: Core library with types, gindex computation, proof structures, beacon client
+  - `service`: REST API (axum), scanner, submitter stubs
+  - `test-vectors`: Binary for generating test vectors (stub)
+- Key dependencies: ssz_rs (git), alloy 1.6, axum 0.8, tokio, serde
+- 24 Rust tests passing (14 in proof-gen, 10 in service)
+- SSZ types: PendingConsolidation, Validator, BeaconBlockHeader with ssz_rs SimpleSerialize
+- GindexCalculator: Computes gindices for validators and pending_consolidations fields
+- Preset support via cargo features: `gnosis` (default) and `minimal`
+- ConsolidationProofBundle: JSON-serializable proof bundle with hex encoding
+- BeaconClient: Beacon API HTTP client for state/header/finality queries
+- Service API: /health, /status, /consolidations endpoints
+- Next: Step 7 (proof-gen proof generation using ssz_rs::Prove)
 
 **2026-02-12:** Rust workspace scaffolding complete
 - Steps 5-6 completed
