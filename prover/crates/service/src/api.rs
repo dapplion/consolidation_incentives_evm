@@ -30,6 +30,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/status", get(status))
         .route("/consolidations", get(list_consolidations))
         .route("/consolidations/{source_index}", get(get_consolidation))
+        .route("/metrics", get(metrics))
         .with_state(state)
 }
 
@@ -100,6 +101,81 @@ async fn get_consolidation(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+/// Prometheus metrics endpoint
+async fn metrics(State(state): State<AppState>) -> String {
+    use metrics::{describe_counter, describe_gauge, describe_histogram};
+
+    // Register metric descriptions
+    describe_gauge!("sync_current_slot", "Current finalized slot");
+    describe_gauge!("sync_slots_behind", "Number of slots behind head");
+    describe_counter!(
+        "consolidations_detected_total",
+        "Total consolidations detected"
+    );
+    describe_counter!(
+        "consolidations_submitted_total",
+        "Total consolidation claims submitted"
+    );
+    describe_counter!(
+        "consolidations_confirmed_total",
+        "Total consolidation claims confirmed"
+    );
+    describe_counter!(
+        "consolidations_failed_total",
+        "Total consolidation claims failed"
+    );
+    describe_histogram!(
+        "proof_generation_duration_seconds",
+        "Time to generate proofs"
+    );
+    describe_histogram!("tx_submission_duration_seconds", "Time to submit transaction");
+
+    // Update gauge values from state
+    metrics::gauge!("sync_current_slot").set(state.current_slot() as f64);
+    metrics::gauge!("sync_slots_behind").set(state.slots_behind() as f64);
+
+    let counts = state.status_counts();
+    metrics::gauge!("consolidations_detected_count").set(counts.detected as f64);
+    metrics::gauge!("consolidations_proof_built_count").set(counts.proof_built as f64);
+    metrics::gauge!("consolidations_submitted_count").set(counts.submitted as f64);
+    metrics::gauge!("consolidations_confirmed_count").set(counts.confirmed as f64);
+    metrics::gauge!("consolidations_failed_count").set(counts.failed as f64);
+
+    // Export in Prometheus text format
+    // Note: This is a simplified implementation
+    // Full production would use metrics-exporter-prometheus PrometheusBuilder
+    format!(
+        "# HELP sync_current_slot Current finalized slot\n\
+         # TYPE sync_current_slot gauge\n\
+         sync_current_slot {}\n\
+         # HELP sync_slots_behind Number of slots behind head\n\
+         # TYPE sync_slots_behind gauge\n\
+         sync_slots_behind {}\n\
+         # HELP consolidations_detected_count Consolidations in detected state\n\
+         # TYPE consolidations_detected_count gauge\n\
+         consolidations_detected_count {}\n\
+         # HELP consolidations_proof_built_count Consolidations with proofs built\n\
+         # TYPE consolidations_proof_built_count gauge\n\
+         consolidations_proof_built_count {}\n\
+         # HELP consolidations_submitted_count Consolidations submitted on-chain\n\
+         # TYPE consolidations_submitted_count gauge\n\
+         consolidations_submitted_count {}\n\
+         # HELP consolidations_confirmed_count Consolidations confirmed on-chain\n\
+         # TYPE consolidations_confirmed_count gauge\n\
+         consolidations_confirmed_count {}\n\
+         # HELP consolidations_failed_count Failed consolidation claims\n\
+         # TYPE consolidations_failed_count gauge\n\
+         consolidations_failed_count {}\n",
+        state.current_slot(),
+        state.slots_behind(),
+        counts.detected,
+        counts.proof_built,
+        counts.submitted,
+        counts.confirmed,
+        counts.failed
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +239,18 @@ mod tests {
         assert_eq!(response.current_epoch, 6);
         assert_eq!(response.head_slot, 120);
         assert_eq!(response.slots_behind, 20);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_endpoint() {
+        let state = AppState::new();
+        state.set_current_slot(100);
+        state.set_head_slot(150);
+
+        let output = metrics(State(state)).await;
+
+        assert!(output.contains("sync_current_slot 100"));
+        assert!(output.contains("sync_slots_behind 50"));
+        assert!(output.contains("consolidations_detected_count"));
     }
 }
