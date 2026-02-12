@@ -493,7 +493,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 4 | ✅ | `MockBeaconRootsOracle.sol` | Test mock for EIP-4788 |
 | 5 | ✅ | Rust workspace scaffolding | Cargo workspace, deps |
 | 6 | ✅ | `proof-gen` types + gindex | SSZ types, gindex computation |
-| 7 | ⬜ | `proof-gen` proof generation | Proof computation using ssz_rs |
+| 7 | ✅ | `proof-gen` proof generation | Proof computation using ssz_rs |
 | 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
 | 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
@@ -538,3 +538,17 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - 24 Rust tests passing + 40 Solidity tests still passing
 - Key dependencies: ssz_rs, alloy, axum, tokio, reqwest
 - Next: proof-gen proof generation using ssz_rs (Step 7)
+
+**2026-02-12:** Step 7 completed - Proof generation using ssz_rs
+- Implemented actual Merkle proof generation using ssz_rs's `Prove` trait
+- Created `beacon_state.rs` with full Electra BeaconState structure:
+  - `MinimalBeaconState`: Full 37-field structure with production-size limits
+  - `TestBeaconState`: Lightweight version with small limits for unit tests (64 validators, 8 consolidations)
+- Key types: Validator, PendingConsolidation, BeaconBlockHeader, Checkpoint, Fork, Eth1Data, etc.
+- `ProofGenerator::generate_proofs_from_state()`: Generates all three proofs from state root
+- `ProofGenerator::generate_full_proof_bundle()`: Generates proofs from block root (includes header wrapping)
+- `StateProofBundle`: Intermediate result with state-level proofs
+- Proof paths used: `["pending_consolidations", i, "source_index"]`, `["validators", idx, "withdrawal_credentials"]`, `["validators", idx, "activation_epoch"]`
+- 36 Rust tests passing (up from 24), 40 Solidity tests still passing
+- Fixed memory allocation issues by using TestBeaconState with smaller list limits for tests
+- Next: Step 8 (test-vectors binary to generate JSON test vectors for Solidity tests)

@@ -7,11 +7,14 @@
 //! - `validators[i].activation_epoch`
 
 pub mod beacon_client;
+pub mod beacon_state;
 pub mod gindex;
 pub mod proof;
+pub mod sparse_proof;
 pub mod types;
 
 pub use beacon_client::BeaconClient;
+pub use beacon_state::{MinimalBeaconState, BeaconBlockHeader as FullBeaconBlockHeader};
 pub use gindex::GindexCalculator;
-pub use proof::{ConsolidationProofBundle, ProofGenerator};
+pub use proof::{ConsolidationProofBundle, ProofGenerator, ProofError};
 pub use types::*;

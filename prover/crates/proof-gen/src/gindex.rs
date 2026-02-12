@@ -2,6 +2,14 @@
 //!
 //! Computes generalized indices (gindices) for SSZ Merkle proofs.
 //! These must match the Solidity contract's hardcoded gindex functions.
+//!
+//! ## Presets
+//!
+//! - **Gnosis/Mainnet**: validators 2^40, pending_consolidations 2^18
+//! - **Test (MinimalBeaconState)**: validators 2^10, pending_consolidations 2^6
+//!
+//! The calculator methods use the configured preset. For test vector generation,
+//! use `GindexCalculator::for_test_state()` methods.
 
 use crate::types::preset;
 
@@ -42,6 +50,12 @@ impl GindexCalculator {
 
     // source_index is field index 0
     const SOURCE_INDEX_FIELD_INDEX: u64 = 0;
+    
+    // Test state limits (MinimalBeaconState)
+    /// Validators tree depth for test state: log2(1024) = 10
+    pub const TEST_VALIDATORS_TREE_DEPTH: u32 = 10;
+    /// Pending consolidations tree depth for test state: log2(64) = 6
+    pub const TEST_CONSOLIDATIONS_TREE_DEPTH: u32 = 6;
 
     /// Compute gindex for `pending_consolidations[i].source_index` from block root
     ///
@@ -163,11 +177,87 @@ impl GindexCalculator {
         63 - gindex.leading_zeros()
     }
 
-    /// Expected proof length for consolidation source_index
+    /// Expected proof length for consolidation source_index (production preset)
     #[must_use]
     pub fn consolidation_proof_length() -> u32 {
         let gindex = Self::consolidation_source_gindex(0);
         Self::gindex_depth(gindex)
+    }
+    
+    // =========================================================================
+    // Test State Methods (for MinimalBeaconState with small limits)
+    // =========================================================================
+    
+    /// Compute gindex for consolidation source_index using test state limits
+    #[must_use]
+    pub fn test_consolidation_source_gindex(consolidation_index: u64) -> u64 {
+        let state_root_in_header = Self::HEADER_BASE_GINDEX + Self::STATE_ROOT_FIELD_INDEX;
+        let pending_consolidations_in_state =
+            Self::BEACON_STATE_BASE_GINDEX + Self::PENDING_CONSOLIDATIONS_FIELD_INDEX;
+        let consolidations_data_depth = Self::TEST_CONSOLIDATIONS_TREE_DEPTH;
+        let element_gindex_in_data = (1_u64 << consolidations_data_depth) + consolidation_index;
+        let source_in_consolidation =
+            Self::CONSOLIDATION_BASE_GINDEX + Self::SOURCE_INDEX_FIELD_INDEX;
+
+        Self::concat_gindices(&[
+            state_root_in_header,
+            pending_consolidations_in_state,
+            2,
+            element_gindex_in_data,
+            source_in_consolidation,
+        ])
+    }
+    
+    /// Compute gindex for validator credentials using test state limits
+    #[must_use]
+    pub fn test_validator_credentials_gindex(validator_index: u64) -> u64 {
+        let state_root_in_header = Self::HEADER_BASE_GINDEX + Self::STATE_ROOT_FIELD_INDEX;
+        let validators_in_state = Self::BEACON_STATE_BASE_GINDEX + Self::VALIDATORS_FIELD_INDEX;
+        let validators_data_depth = Self::TEST_VALIDATORS_TREE_DEPTH;
+        let element_gindex_in_data = (1_u64 << validators_data_depth) + validator_index;
+        let credentials_in_validator =
+            Self::VALIDATOR_BASE_GINDEX + Self::WITHDRAWAL_CREDENTIALS_FIELD_INDEX;
+
+        Self::concat_gindices(&[
+            state_root_in_header,
+            validators_in_state,
+            2,
+            element_gindex_in_data,
+            credentials_in_validator,
+        ])
+    }
+    
+    /// Compute gindex for validator activation_epoch using test state limits
+    #[must_use]
+    pub fn test_validator_activation_epoch_gindex(validator_index: u64) -> u64 {
+        let state_root_in_header = Self::HEADER_BASE_GINDEX + Self::STATE_ROOT_FIELD_INDEX;
+        let validators_in_state = Self::BEACON_STATE_BASE_GINDEX + Self::VALIDATORS_FIELD_INDEX;
+        let validators_data_depth = Self::TEST_VALIDATORS_TREE_DEPTH;
+        let element_gindex_in_data = (1_u64 << validators_data_depth) + validator_index;
+        let activation_in_validator =
+            Self::VALIDATOR_BASE_GINDEX + Self::ACTIVATION_EPOCH_FIELD_INDEX;
+
+        Self::concat_gindices(&[
+            state_root_in_header,
+            validators_in_state,
+            2,
+            element_gindex_in_data,
+            activation_in_validator,
+        ])
+    }
+    
+    /// Expected proof length for consolidation in test state
+    #[must_use]
+    pub fn test_consolidation_proof_length() -> u32 {
+        // header (3) + state (6) + list (1) + data (6) + field (1) = 17
+        Self::HEADER_TREE_DEPTH + Self::BEACON_STATE_TREE_DEPTH + 1 + Self::TEST_CONSOLIDATIONS_TREE_DEPTH + Self::CONSOLIDATION_TREE_DEPTH
+    }
+    
+    /// Expected proof length for validator fields in test state
+    #[must_use]
+    pub fn test_validator_proof_length() -> u32 {
+        // header (3) + state (6) + list (1) + data (10) + field (3) = 23
+        Self::HEADER_TREE_DEPTH + Self::BEACON_STATE_TREE_DEPTH + 1 + Self::TEST_VALIDATORS_TREE_DEPTH + Self::VALIDATOR_TREE_DEPTH
     }
 
     /// Expected proof length for validator fields
