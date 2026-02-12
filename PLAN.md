@@ -494,8 +494,8 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 5 | ✅ | Rust workspace scaffolding | Cargo workspace, deps |
 | 6 | ✅ | `proof-gen` types + gindex | SSZ types, gindex computation |
 | 7 | ✅ | `proof-gen` proof generation | Sparse proof generation + cross-validation |
-| 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
-| 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
+| 8 | ✅ | `test-vectors` binary | Generate JSON test vectors |
+| 9 | ✅ | Solidity tests (load vectors) | Integration tests using real SSZ proofs |
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
 | 11 | 🔸 | Rust `beacon_client` | Beacon API HTTP client (structure done, needs testing) |
 | 12 | 🔸 | Rust `scanner` | Consolidation detection loop (scaffolded) |
@@ -538,6 +538,30 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - 24 Rust tests passing + 40 Solidity tests still passing
 - Key dependencies: ssz_rs, alloy, axum, tokio, reqwest
 - Next: proof-gen proof generation using ssz_rs (Step 7)
+
+**2026-02-12 (late evening):** Steps 8-9 completed - Test vectors + Solidity integration tests
+- **Step 8: test-vectors binary**: Fully implemented `generate-test-vectors` binary that:
+  - Builds validators and consolidations with various properties (0x01/0x02/BLS credentials, eligible/ineligible epochs)
+  - Computes all 37 BeaconState field roots independently using gnosis tree depths (40 for validators, 18 for consolidations)
+  - Uses `StateProver` with gnosis depths to generate proofs matching Solidity contract constants
+  - Generates 4 valid claims + 9 invalid claims (tampered proofs, wrong values, ineligible, BLS, swapped proofs)
+  - Output: `contracts/test-vectors/test_vectors.json` (140KB, proofs of length 29 and 53)
+- **Step 9: Solidity integration tests**: `ConsolidationIncentivesVectors.t.sol` with 22 tests:
+  - Loads test vectors via `vm.readFile` + `vm.parseJson`
+  - Happy path: 4 successful claims (0x01, 0x02 credentials)
+  - Multi-claim: All 4 validators claim sequentially
+  - Double-claim prevention
+  - Event emission verification
+  - Eligibility: activation epoch at/above maxEpoch rejected
+  - BLS credentials (0x00 prefix) rejected
+  - Tampered proofs: consolidation, credentials, activation epoch
+  - Wrong values: source_index, credentials, activation_epoch
+  - Swapped proofs (wrong length detection)
+  - Finality: too recent / exact delay / not in oracle
+  - Insufficient balance
+- **Total: 119 tests passing** (47 Rust + 62 Solidity + 10 service)
+- Cross-language validation: Rust generates SSZ Merkle proofs → Solidity verifies them on-chain
+- Next: Steps 11-14 (Rust service polish) or Step 16 (Deploy.s.sol)
 
 **2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
 - **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
