@@ -493,7 +493,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 4 | ✅ | `MockBeaconRootsOracle.sol` | Test mock for EIP-4788 |
 | 5 | ✅ | Rust workspace scaffolding | Cargo workspace, deps |
 | 6 | ✅ | `proof-gen` types + gindex | SSZ types, gindex computation |
-| 7 | ✅ | `proof-gen` proof generation | Proof computation using ssz_rs |
+| 7 | ✅ | `proof-gen` proof generation | Sparse proof generation + cross-validation |
 | 8 | ⬜ | `test-vectors` binary | Generate JSON test vectors |
 | 9 | ⬜ | Solidity tests (load vectors) | All tests listed above, 100% coverage |
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
@@ -539,21 +539,26 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - Key dependencies: ssz_rs, alloy, axum, tokio, reqwest
 - Next: proof-gen proof generation using ssz_rs (Step 7)
 
-**2026-02-12 (evening):** Step 7 completed - Proof generation working
-- Full proof generation with ssz_rs's `Prove` trait working end-to-end
-- Rewrote `beacon_state.rs`:
-  - `MinimalBeaconState`: Full 37-field Electra structure with **small test limits** (1024 validators, 64 consolidations)
-  - This allows in-memory proof generation without memory allocation failures
-  - Test state tree depths: validators=10, consolidations=6 (vs production 40, 18)
-- `gindex.rs` additions:
-  - `test_consolidation_source_gindex()`: Gindex for test state proofs
-  - `test_validator_credentials_gindex()`: Gindex for test validator proofs
-  - `test_consolidation_proof_length()`: Returns 17 (vs 29 production)
-  - `test_validator_proof_length()`: Returns 23 (vs 53 production)
-- `proof.rs` improvements:
-  - `ProofGenerator::generate_proofs_from_state()`: Generates state-level proofs
-  - `ProofGenerator::generate_full_proof_bundle()`: Complete proofs from block root
-  - `ProofGenerator::verify_proof_bundle_test()`: Verification using test gindices
-  - Full round-trip test: generate proofs → verify against block root ✅
-- 37 Rust tests passing (27 proof-gen + 10 service), 40 Solidity tests passing
-- Next: Step 8 (test-vectors binary)
+**2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
+- **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
+  Merkle tree. This makes it unusable for production-scale validator lists.
+- **Solution**: Implemented sparse Merkle proof generation (`sparse_proof.rs` + `state_prover.rs`)
+  that builds proofs layer-by-layer without allocating full trees:
+  1. `sparse_proof.rs`: Low-level sparse proof primitives
+     - `prove_against_leaf_chunks()`: Generates proofs for any tree depth using zero-hash padding
+     - `prove_list_element()`: Proofs through SSZ List structure (data tree + length mix-in)
+     - `prove_container_field()`: Proofs through SSZ containers
+     - `prove_small_container_field()`: Delegates to ssz_rs for small types (Validator, etc.)
+  2. `state_prover.rs`: High-level `StateProver` that composes proofs through the beacon state
+     - Takes pre-computed field roots (37 hashes) + validators/consolidations data
+     - Works with **any** list limits (2^40 validators, 2^18 consolidations) efficiently
+     - `prove_consolidation_source_index()`: Full proof from state root
+     - `prove_validator_credentials()`: Full proof from state root
+     - `prove_validator_activation_epoch()`: Full proof from state root
+     - `generate_full_proof_bundle()`: Complete proofs from block root (adds header layer)
+- **Cross-validated**: Sparse proofs match ssz_rs's built-in `prove()` exactly (byte-for-byte)
+  on MinimalBeaconState with small limits. Two dedicated cross-validation tests confirm this.
+- **End-to-end verified**: Full proof bundles verified against block root using `ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index()`
+- 55 tests passing total: 45 proof-gen (8 sparse_proof + 8 state_prover + rest) + 10 service
+- 40 Solidity tests still passing
+- Next: Step 8 (test-vectors binary using StateProver)

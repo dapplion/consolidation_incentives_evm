@@ -91,17 +91,9 @@ pub fn prove_against_leaf_chunks(
 
     for level in 0..depth {
         let sibling_pos = pos ^ 1;
-        let subtree_depth = level; // at level 0, siblings are individual leaves; at level 1, siblings are roots of depth-1 subtrees, etc.
-        // Wait, let me reconsider. At level 0 (bottom), we're looking at individual leaf positions.
-        // The sibling is just leaf_chunks[sibling_pos] or zero.
-        // At level 1, after hashing pairs, the sibling is a node that's the hash of 2 leaves.
-        // But we don't store intermediate layers.
 
-        // Better approach: compute the sibling hash by computing the root of the subtree
-        // that the sibling covers at this level.
-
+        // Compute the sibling hash by computing the root of the subtree it covers.
         // At level `level`, each node covers 2^level leaves.
-        // The sibling at this level covers leaves [sibling_pos * 2^level .. (sibling_pos+1) * 2^level)
         let subtree_size = 1usize << level;
         let start = sibling_pos * subtree_size;
 

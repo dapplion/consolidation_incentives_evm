@@ -14,7 +14,7 @@ use thiserror::Error;
 
 /// Convert ssz_rs Node to [u8; 32]
 fn node_to_bytes(node: Node) -> [u8; 32] {
-    node.0.into()
+    node.0
 }
 
 /// Convert [u8; 32] to ssz_rs Node
