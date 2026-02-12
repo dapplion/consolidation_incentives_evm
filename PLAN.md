@@ -539,16 +539,21 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - Key dependencies: ssz_rs, alloy, axum, tokio, reqwest
 - Next: proof-gen proof generation using ssz_rs (Step 7)
 
-**2026-02-12:** Step 7 completed - Proof generation using ssz_rs
-- Implemented actual Merkle proof generation using ssz_rs's `Prove` trait
-- Created `beacon_state.rs` with full Electra BeaconState structure:
-  - `MinimalBeaconState`: Full 37-field structure with production-size limits
-  - `TestBeaconState`: Lightweight version with small limits for unit tests (64 validators, 8 consolidations)
-- Key types: Validator, PendingConsolidation, BeaconBlockHeader, Checkpoint, Fork, Eth1Data, etc.
-- `ProofGenerator::generate_proofs_from_state()`: Generates all three proofs from state root
-- `ProofGenerator::generate_full_proof_bundle()`: Generates proofs from block root (includes header wrapping)
-- `StateProofBundle`: Intermediate result with state-level proofs
-- Proof paths used: `["pending_consolidations", i, "source_index"]`, `["validators", idx, "withdrawal_credentials"]`, `["validators", idx, "activation_epoch"]`
-- 36 Rust tests passing (up from 24), 40 Solidity tests still passing
-- Fixed memory allocation issues by using TestBeaconState with smaller list limits for tests
-- Next: Step 8 (test-vectors binary to generate JSON test vectors for Solidity tests)
+**2026-02-12 (evening):** Step 7 completed - Proof generation working
+- Full proof generation with ssz_rs's `Prove` trait working end-to-end
+- Rewrote `beacon_state.rs`:
+  - `MinimalBeaconState`: Full 37-field Electra structure with **small test limits** (1024 validators, 64 consolidations)
+  - This allows in-memory proof generation without memory allocation failures
+  - Test state tree depths: validators=10, consolidations=6 (vs production 40, 18)
+- `gindex.rs` additions:
+  - `test_consolidation_source_gindex()`: Gindex for test state proofs
+  - `test_validator_credentials_gindex()`: Gindex for test validator proofs
+  - `test_consolidation_proof_length()`: Returns 17 (vs 29 production)
+  - `test_validator_proof_length()`: Returns 23 (vs 53 production)
+- `proof.rs` improvements:
+  - `ProofGenerator::generate_proofs_from_state()`: Generates state-level proofs
+  - `ProofGenerator::generate_full_proof_bundle()`: Complete proofs from block root
+  - `ProofGenerator::verify_proof_bundle_test()`: Verification using test gindices
+  - Full round-trip test: generate proofs → verify against block root ✅
+- 37 Rust tests passing (27 proof-gen + 10 service), 40 Solidity tests passing
+- Next: Step 8 (test-vectors binary)

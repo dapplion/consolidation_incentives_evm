@@ -34,7 +34,7 @@ fn zero_hashes() -> Vec<[u8; 32]> {
 }
 
 /// SHA-256 hash of two 32-byte nodes
-fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+pub fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(left);
     hasher.update(right);
