@@ -740,3 +740,21 @@ This is the final validation before mainnet deployment.
   - CLI and web3 interaction examples
 - Both READMEs cross-reference other docs for complete navigation
 - **All documentation complete** — project ready for deployment phase
+
+**2026-02-13 (morning):** NEXT_STEPS.md created — Deployment roadmap
+- Comprehensive guide for moving from MVP to production
+- **Phase 1: Chiado Testnet Deployment**
+  - Contract deployment with testnet parameters
+  - Submitter integration (alloy contract bindings)
+  - Beacon node access setup (SSH tunnel or local node)
+  - Scanner implementation (full SSZ deserialization)
+  - Real chain testing with deployed contract
+  - Full service deployment and monitoring
+- **Phase 2: Mainnet Deployment**
+  - Parameter determination (MAX_EPOCH, rewardAmount, minClaimDelay)
+  - Multisig deployment workflow
+  - Dune Analytics integration
+  - Production systemd + Prometheus setup
+  - Public announcement strategy
+- **Troubleshooting:** Common issues and solutions
+- **All MVP work complete** — remaining tasks explicitly require production infrastructure (deployed contract + beacon debug API)
