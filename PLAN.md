@@ -663,6 +663,14 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - All Rust tests still passing (70 tests)
 - **Status: 13/17 complete (11-13 deferred to production, need alloy ABI bindings)**
 
+**2026-02-13 (morning):** Added STATUS.md - Project overview
+- Created comprehensive `STATUS.md` with project completion summary
+- Documents all component statuses (contracts ✅, proof-gen ✅, API ✅, scanner/submitter 🔸)
+- Test coverage breakdown: 138 tests total (68 Solidity + 70 Rust)
+- Next steps guide for production deployment (Chiado → mainnet)
+- Quick reference for key files and dependencies
+- **All MVP components complete** — ready for deployment phase
+
 **2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
 - **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
   Merkle tree. This makes it unusable for production-scale validator lists.
