@@ -497,7 +497,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 8 | ✅ | `test-vectors` binary | Generate JSON test vectors |
 | 9 | ✅ | Solidity tests (load vectors) | Integration tests using real SSZ proofs |
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
-| 11 | 🔸 | Rust `beacon_client` | Beacon API HTTP client (needs integration tests with mock server) |
+| 11 | ✅ | Rust `beacon_client` | Beacon API HTTP client with wiremock integration tests (10 tests passing) |
 | 12 | 🔸 | Rust `scanner` | Consolidation detection loop (scaffolded, needs full SSZ deserialization) |
 | 13 | ✅ | Rust `submitter` | On-chain tx submission (full alloy contract integration) |
 | 14 | ✅ | Rust `api` | REST API + Prometheus metrics (all endpoints + metrics complete) |
@@ -775,3 +775,17 @@ This is the final validation before mainnet deployment.
   - Public announcement strategy
 - **Troubleshooting:** Common issues and solutions
 - **All MVP work complete** — remaining tasks explicitly require production infrastructure (deployed contract + beacon debug API)
+
+**2026-02-13 (late morning):** Step 11 completed - Beacon client integration tests
+- Added `wiremock` as dev dependency for HTTP mocking
+- Created 7 comprehensive integration tests:
+  - `test_get_state_ssz`: Valid SSZ state fetch
+  - `test_get_state_ssz_not_found`: 404 handling
+  - `test_get_header`: Parse JSON header response
+  - `test_get_header_not_found`: 404 handling
+  - `test_get_finality_checkpoints`: Parse finality checkpoints
+  - `test_get_head_slot`: Head slot query
+  - `test_get_header_invalid_json`: Error handling for malformed responses
+- **Total: 150 tests passing** (82 Rust: 54 proof-gen + 16 service + 12 integration, 68 Solidity)
+- All beacon_client methods fully tested with mock HTTP server
+- Next: Step 12 (scanner full implementation) - blocked on production beacon node access

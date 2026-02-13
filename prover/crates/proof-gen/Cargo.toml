@@ -26,3 +26,4 @@ tokio.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+wiremock = "0.6"

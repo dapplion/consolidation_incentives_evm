@@ -227,4 +227,192 @@ mod tests {
         let hex = "0x0102";
         assert!(parse_hex32(hex).is_err());
     }
+
+    #[tokio::test]
+    async fn test_get_state_ssz() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, header};
+
+        let mock_server = MockServer::start().await;
+        
+        // Mock SSZ state response
+        let ssz_data = vec![0x01, 0x02, 0x03, 0x04];
+        Mock::given(method("GET"))
+            .and(path("/eth/v2/debug/beacon/states/12345"))
+            .and(header("Accept", "application/octet-stream"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(ssz_data.clone()))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_state_ssz("12345").await.unwrap();
+        
+        assert_eq!(result, ssz_data);
+    }
+
+    #[tokio::test]
+    async fn test_get_state_ssz_not_found() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v2/debug/beacon/states/99999"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_state_ssz("99999").await;
+        
+        assert!(matches!(result, Err(BeaconClientError::StateNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_header() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        let response_json = r#"{
+            "data": {
+                "header": {
+                    "message": {
+                        "slot": "12345",
+                        "proposer_index": "42",
+                        "parent_root": "0x0101010101010101010101010101010101010101010101010101010101010101",
+                        "state_root": "0x0202020202020202020202020202020202020202020202020202020202020202",
+                        "body_root": "0x0303030303030303030303030303030303030303030303030303030303030303"
+                    }
+                }
+            }
+        }"#;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/12345"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let header = client.get_header("12345").await.unwrap();
+        
+        assert_eq!(header.slot, 12345);
+        assert_eq!(header.proposer_index, 42);
+        assert_eq!(header.parent_root[0], 0x01);
+        assert_eq!(header.state_root[0], 0x02);
+        assert_eq!(header.body_root[0], 0x03);
+    }
+
+    #[tokio::test]
+    async fn test_get_header_not_found() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/99999"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_header("99999").await;
+        
+        assert!(matches!(result, Err(BeaconClientError::HeaderNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_finality_checkpoints() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        let response_json = r#"{
+            "data": {
+                "previous_justified": {
+                    "epoch": "100",
+                    "root": "0x0101010101010101010101010101010101010101010101010101010101010101"
+                },
+                "current_justified": {
+                    "epoch": "101",
+                    "root": "0x0202020202020202020202020202020202020202020202020202020202020202"
+                },
+                "finalized": {
+                    "epoch": "99",
+                    "root": "0x0303030303030303030303030303030303030303030303030303030303030303"
+                }
+            }
+        }"#;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/head/finality_checkpoints"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let checkpoints = client.get_finality_checkpoints().await.unwrap();
+        
+        assert_eq!(checkpoints.previous_justified_epoch, 100);
+        assert_eq!(checkpoints.current_justified_epoch, 101);
+        assert_eq!(checkpoints.finalized_epoch, 99);
+        assert_eq!(checkpoints.finalized_root[0], 0x03);
+    }
+
+    #[tokio::test]
+    async fn test_get_head_slot() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        let response_json = r#"{
+            "data": {
+                "header": {
+                    "message": {
+                        "slot": "54321",
+                        "proposer_index": "7",
+                        "parent_root": "0x0101010101010101010101010101010101010101010101010101010101010101",
+                        "state_root": "0x0202020202020202020202020202020202020202020202020202020202020202",
+                        "body_root": "0x0303030303030303030303030303030303030303030303030303030303030303"
+                    }
+                }
+            }
+        }"#;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/head"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let slot = client.get_head_slot().await.unwrap();
+        
+        assert_eq!(slot, 54321);
+    }
+
+    #[tokio::test]
+    async fn test_get_header_invalid_json() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/12345"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("invalid json"))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_header("12345").await;
+        
+        assert!(result.is_err());
+    }
 }
