@@ -504,6 +504,8 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 15 | ⬜ | Rust integration tests | End-to-end pipeline tests (deferred - needs production data) |
 | 16 | ✅ | `Deploy.s.sol` | Deployment script |
 | 17 | ✅ | Dune queries | Analytics SQL (5 queries + README) |
+| 18 | ⬜ | Real chain proof testing | Generate proofs against live Gnosis beacon state |
+| 19 | ⬜ | Local devnet validation | Deploy contract to local devnet, verify real proofs work |
 
 ### Progress Notes
 
@@ -633,6 +635,34 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
      - `prove_validator_credentials()`: Full proof from state root
      - `prove_validator_activation_epoch()`: Full proof from state root
      - `generate_full_proof_bundle()`: Complete proofs from block root (adds header layer)
+## Part 4: Real Chain Testing
+
+### Step 18: Real Gnosis Chain Proof Generation
+
+Test the proof producer against real Gnosis mainnet beacon state:
+
+1. **Connect to Gnosis beacon node** (e.g., gnosis-bn-validators at 65.108.206.150 or public endpoint)
+2. **Fetch a recent finalized state** with pending_consolidations
+3. **Generate proofs** for actual consolidations using `StateProver`
+4. **Verify proofs locally** against the beacon block root
+5. **Export as test vectors** for devnet testing
+
+This validates the full pipeline works with production-scale data (2^40 validator tree, 2^18 consolidations tree).
+
+### Step 19: Local Devnet Validation
+
+Deploy the contract to a local Anvil fork and test with real proofs:
+
+1. **Fork Gnosis mainnet** with `anvil --fork-url <gnosis-rpc>` 
+2. **Deploy ConsolidationIncentives** via Deploy.s.sol
+3. **Mock the EIP-4788 beacon roots oracle** with real beacon block roots from Step 18
+4. **Submit claims** with the real proofs generated in Step 18
+5. **Verify rewards distributed** correctly to the expected addresses
+
+This is the final validation before mainnet deployment.
+
+---
+
 - **Cross-validated**: Sparse proofs match ssz_rs's built-in `prove()` exactly (byte-for-byte)
   on MinimalBeaconState with small limits. Two dedicated cross-validation tests confirm this.
 - **End-to-end verified**: Full proof bundles verified against block root using `ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index()`
