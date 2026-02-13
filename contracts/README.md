@@ -1,66 +1,482 @@
-## Foundry
+# Consolidation Incentives Smart Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Solidity smart contracts for the Gnosis Chain validator consolidation rewards program. Uses EIP-4788 beacon block roots and SSZ Merkle proofs to verify on-chain that consolidations (EIP-7251) occurred.
 
-Foundry consists of:
+## Overview
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+### What This Does
 
-## Documentation
+Validators who consolidated before a snapshot epoch can claim xDAI rewards by submitting cryptographic proofs that:
+1. They were in the `pending_consolidations` queue
+2. They had 0x01/0x02 withdrawal credentials (not BLS)
+3. They activated before the eligibility cutoff epoch
 
-https://book.getfoundry.sh/
+The contract verifies these proofs against beacon block roots stored by the EIP-4788 oracle.
 
-## Usage
+### Key Features
+
+- ✅ **Zero trust:** No oracle beyond EIP-4788, all proofs cryptographically verified
+- ✅ **Upgradeable:** UUPS proxy pattern for future improvements
+- ✅ **Gas efficient:** ~250k gas per claim with optimized SSZ proof verification
+- ✅ **Double-claim protection:** Each validator index can only claim once
+- ✅ **Finality safety:** Claims require minimum delay after beacon timestamp
+
+## Architecture
+
+### Contracts
+
+#### `ConsolidationIncentives.sol` — Main Contract
+
+**Inheritance:** `UUPSUpgradeable`, `OwnableUpgradeable`
+
+**Storage:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `maxEpoch` | `uint64` | Eligibility cutoff (must activate before this) |
+| `rewardAmount` | `uint256` | Fixed xDAI per successful claim |
+| `minClaimDelay` | `uint256` | Seconds before beacon timestamp is usable |
+| `rewarded` | `mapping(uint64 => bool)` | Tracks claimed validator indices |
+
+**Public Functions:**
+
+```solidity
+function claimReward(
+    uint64 beaconTimestamp,
+    uint64 consolidationIndex,
+    uint64 sourceIndex,
+    uint64 activationEpoch,
+    bytes32 sourceCredentials,
+    bytes32[] calldata proofConsolidation,
+    bytes32[] calldata proofCredentials,
+    bytes32[] calldata proofActivationEpoch
+) external
+```
+
+**Admin Functions:**
+- `withdraw(address to, uint256 amount)` — Withdraw excess funds (owner only)
+- `receive()` — Accept xDAI funding
+- UUPS upgrade authorization (owner only)
+
+**Events:**
+```solidity
+event RewardClaimed(
+    uint64 indexed sourceIndex,
+    address indexed recipient,
+    uint256 amount
+);
+```
+
+#### `SSZMerkleVerifier.sol` — Proof Verification Library
+
+Pure library for verifying SSZ Merkle proofs using SHA256 precompile.
+
+**Core Function:**
+```solidity
+function verifyProof(
+    bytes32 root,
+    bytes32 leaf,
+    bytes32[] calldata proof,
+    uint256 gindex
+) internal view returns (bool)
+```
+
+**Gindex Helpers:**
+```solidity
+// Consolidation source_index: depth 29
+function consolidationSourceGindex(uint64 consolidationIndex) → uint256
+
+// Validator withdrawal_credentials: depth 53
+function validatorCredentialsGindex(uint64 validatorIndex) → uint256
+
+// Validator activation_epoch: depth 53
+function validatorActivationEpochGindex(uint64 validatorIndex) → uint256
+```
+
+**SSZ Encoding:**
+```solidity
+function toLittleEndian64(uint64 value) → bytes32
+```
+
+#### `MockBeaconRootsOracle.sol` — Test Mock
+
+Mock implementation of EIP-4788 oracle for testing. Uses `vm.etch` in tests to deploy at `0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02`.
+
+## Quick Start
+
+### Prerequisites
+
+- **Foundry:** `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Solidity:** 0.8.28 (auto-installed by Foundry)
+
+### Installation
+
+```bash
+cd contracts
+forge install
+```
 
 ### Build
 
-```shell
-$ forge build
+```bash
+forge build
 ```
 
 ### Test
 
-```shell
-$ forge test
-```
+```bash
+# Run all tests
+forge test
 
-### Format
+# With gas reports
+forge test --gas-report
 
-```shell
-$ forge fmt
-```
+# Verbose output
+forge test -vvv
 
-### Gas Snapshots
+# Specific test
+forge test --match-test test_claimReward_success
 
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
+# Coverage
+forge coverage
 ```
 
 ### Deploy
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+See `DEPLOYMENT.md` for full deployment guide. Quick example:
+
+```bash
+# Set environment variables
+export PRIVATE_KEY=0x...
+export MAX_EPOCH=50000
+export REWARD_AMOUNT=10000000000000000  # 0.01 xDAI
+export MIN_CLAIM_DELAY=160  # 2 epochs @ 80s each
+
+# Dry run (Chiado testnet)
+forge script script/Deploy.s.sol \
+  --rpc-url https://rpc.chiadochain.net \
+  --private-key $PRIVATE_KEY
+
+# Broadcast
+forge script script/Deploy.s.sol \
+  --rpc-url https://rpc.chiadochain.net \
+  --private-key $PRIVATE_KEY \
+  --broadcast \
+  --verify
 ```
 
-### Cast
+## Test Coverage
 
-```shell
-$ cast <subcommand>
+**Total: 68 tests passing** (40 SSZMerkleVerifier + 22 integration + 6 deployment)
+
+### `SSZMerkleVerifier.t.sol` (40 tests)
+
+**Valid proof tests:**
+- Depth 1 (minimal tree)
+- Depth 3 (8-leaf tree, various positions)
+- Depth 29 (consolidation proofs)
+- Depth 53 (validator proofs)
+
+**Invalid proof tests:**
+- Wrong leaf value
+- Wrong root
+- Tampered proof (single bit flip)
+- Wrong gindex (wrong position)
+- Wrong proof length
+- Empty proof
+- Edge case: gindex 1 (root itself)
+
+**Encoding tests:**
+- Little-endian uint64 encoding
+
+**Gindex computation tests:**
+- Consolidation field gindices
+- Validator field gindices
+
+### `ConsolidationIncentivesVectors.t.sol` (22 tests)
+
+Loads JSON test vectors generated by Rust prover for cross-language validation.
+
+**Happy path:**
+- Valid claim with 0x01 credentials
+- Valid claim with 0x02 credentials (compounding)
+- Multiple validators claiming
+- Event emission
+
+**Security:**
+- Double-claim prevention
+- Different consolidation index, same source → still blocked
+
+**Eligibility:**
+- Activation epoch too high → revert
+- Activation epoch exactly at maxEpoch → revert
+- Activation epoch at maxEpoch - 1 → success
+
+**Finality:**
+- Timestamp too recent → revert
+- Timestamp exactly at delay → success
+- Timestamp not in oracle → revert
+
+**Invalid proofs:**
+- Tampered consolidation proof
+- Tampered credentials proof
+- Tampered activation epoch proof
+- Wrong source index
+- Wrong credentials
+- Wrong activation epoch
+- Swapped proofs (wrong length detection)
+- Truncated/extended proofs
+
+**Credential edge cases:**
+- BLS credentials (0x00) → revert
+- Unknown prefix (0xFF) → revert
+
+**Funding:**
+- Insufficient balance → revert
+- Receive funding works
+
+### `Deploy.t.sol` (6 tests)
+
+- Deployment without funding
+- Deployment with initial funding
+- Cannot reinitialize (initializer guard)
+- Upgradeability (new implementation)
+- Only owner can upgrade
+- Proxy points to implementation (ERC1967 slot check)
+
+## Project Structure
+
+```
+contracts/
+├── foundry.toml                     # Foundry configuration
+├── remappings.txt                   # Import remappings
+├── src/
+│   ├── ConsolidationIncentives.sol  # Main contract (UUPS upgradeable)
+│   └── lib/
+│       └── SSZMerkleVerifier.sol    # Proof verification library
+├── test/
+│   ├── ConsolidationIncentivesVectors.t.sol  # Integration tests (test vectors)
+│   ├── SSZMerkleVerifier.t.sol              # Library unit tests
+│   ├── Deploy.t.sol                          # Deployment tests
+│   └── mocks/
+│       └── MockBeaconRootsOracle.sol         # EIP-4788 mock
+├── script/
+│   └── Deploy.s.sol                 # Deployment script
+├── test-vectors/
+│   └── test_vectors.json            # Generated by Rust prover (140KB)
+├── DEPLOYMENT.md                     # Deployment guide
+└── README.md                         # This file
 ```
 
-### Help
+## Configuration
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+### `foundry.toml`
+
+```toml
+[profile.default]
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+via_ir = true  # Required to avoid stack-too-deep errors
 ```
+
+### Environment Variables (Deployment)
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `PRIVATE_KEY` | Yes | Deployer private key | `0x...` |
+| `MAX_EPOCH` | Yes | Eligibility cutoff epoch | `50000` |
+| `REWARD_AMOUNT` | Yes | xDAI per claim (wei) | `10000000000000000` (0.01 xDAI) |
+| `MIN_CLAIM_DELAY` | Yes | Finality delay (seconds) | `160` (2 epochs) |
+| `INITIAL_FUNDING` | No | xDAI to fund during deploy | `1000000000000000000` (1 xDAI) |
+
+## Constants (Gnosis Chain)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `EIP4788_ORACLE` | `0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02` | Beacon root oracle |
+| `CONSOLIDATION_PROOF_LENGTH` | 29 | Siblings for consolidation proof |
+| `VALIDATOR_PROOF_LENGTH` | 53 | Siblings for validator proofs |
+| Slot time | 5 seconds | Gnosis slot duration |
+| Slots per epoch | 16 | Gnosis epoch size |
+| Epoch duration | 80 seconds | 16 slots × 5s |
+
+## Proof Structure
+
+### What Gets Proven
+
+For each claim, we verify three SSZ Merkle proofs against a beacon block root:
+
+1. **Consolidation source index** (depth 29):
+   - Path: `header → state → pending_consolidations[i] → source_index`
+   - Proves this validator was in the consolidation queue
+
+2. **Withdrawal credentials** (depth 53):
+   - Path: `header → state → validators[sourceIndex] → withdrawal_credentials`
+   - Proves the validator has 0x01 or 0x02 credentials
+   - Recipient address extracted from last 20 bytes
+
+3. **Activation epoch** (depth 53):
+   - Path: `header → state → validators[sourceIndex] → activation_epoch`
+   - Proves the validator activated before maxEpoch
+
+### Proof Generation
+
+Proofs are generated by the Rust proof service (see `../prover/`). The Solidity contracts only verify them.
+
+## Security
+
+### Audits
+
+⚠️ **Not audited** — This is experimental software. Use at your own risk.
+
+### Known Limitations
+
+1. **EIP-4788 availability:** Oracle only retains ~27 hours of history (8191 blocks)
+2. **Finality assumptions:** Requires `minClaimDelay` to ensure referenced state is finalized
+3. **No slashing check:** Slashed validators can claim if they meet other criteria
+4. **Static reward amount:** Can't adjust per-validator without upgrade
+
+### Upgrade Safety
+
+- Uses UUPS pattern (implementation in proxy storage)
+- Only owner can authorize upgrades
+- State variables are append-only safe
+- Existing claims cannot be retroactively invalidated
+
+## Gas Costs
+
+Approximate costs on Gnosis Chain (measured with 200 optimizer runs):
+
+| Operation | Gas | xDAI (5 gwei) |
+|-----------|-----|---------------|
+| Deploy proxy | ~500k | ~0.0025 |
+| Deploy implementation | ~2.5M | ~0.0125 |
+| Claim reward | ~250k | ~0.00125 |
+
+Claims are gas-efficient due to:
+- Optimized SSZ proof verification (SHA256 precompile)
+- Single storage write (`rewarded[sourceIndex] = true`)
+- No loops or complex state transitions
+
+## Interacting with Deployed Contract
+
+### Using Cast (CLI)
+
+```bash
+# Check if a validator has claimed
+cast call $CONTRACT_ADDRESS "rewarded(uint64)(bool)" 12345 \
+  --rpc-url https://rpc.gnosischain.com
+
+# Get reward amount
+cast call $CONTRACT_ADDRESS "rewardAmount()(uint256)" \
+  --rpc-url https://rpc.gnosischain.com
+
+# Submit claim (requires proof data)
+cast send $CONTRACT_ADDRESS \
+  "claimReward(uint64,uint64,uint64,uint64,bytes32,bytes32[],bytes32[],bytes32[])" \
+  $BEACON_TIMESTAMP $CONSOLIDATION_INDEX $SOURCE_INDEX \
+  $ACTIVATION_EPOCH $SOURCE_CREDENTIALS \
+  "[$PROOF_CONSOLIDATION]" "[$PROOF_CREDENTIALS]" "[$PROOF_ACTIVATION_EPOCH]" \
+  --rpc-url https://rpc.gnosischain.com \
+  --private-key $PRIVATE_KEY
+```
+
+### Using Ethers.js
+
+```javascript
+const abi = [...]; // Load from build artifacts
+const contract = new ethers.Contract(contractAddress, abi, signer);
+
+// Check claim status
+const claimed = await contract.rewarded(sourceIndex);
+
+// Submit claim
+const tx = await contract.claimReward(
+  beaconTimestamp,
+  consolidationIndex,
+  sourceIndex,
+  activationEpoch,
+  sourceCredentials,
+  proofConsolidation,
+  proofCredentials,
+  proofActivationEpoch
+);
+await tx.wait();
+```
+
+## Troubleshooting
+
+### "Stack too deep" compilation errors
+
+Ensure `via_ir = true` is set in `foundry.toml`. This uses the Yul IR optimizer which avoids stack depth issues.
+
+### "Invalid proof" during tests
+
+- Check test vectors are up to date: `cd ../prover && cargo run --bin generate-test-vectors`
+- Verify gindex constants match between Solidity and Rust
+- Ensure proof lengths are correct (29 for consolidations, 53 for validators)
+
+### Deployment verification fails
+
+```bash
+# Manual verification
+forge verify-contract $CONTRACT_ADDRESS \
+  src/ConsolidationIncentives.sol:ConsolidationIncentives \
+  --chain-id 100 \
+  --constructor-args $(cast abi-encode "constructor()")
+```
+
+### Tests fail to load JSON vectors
+
+```bash
+# Regenerate test vectors
+cd ../prover
+cargo run --bin generate-test-vectors
+
+# Check file exists
+ls -lh ../contracts/test-vectors/test_vectors.json
+```
+
+## Development Workflow
+
+### Adding New Tests
+
+1. Add test function to appropriate file (`test/*.t.sol`)
+2. Run: `forge test --match-test your_new_test -vvv`
+3. Check coverage: `forge coverage`
+
+### Modifying Contracts
+
+1. Edit `src/ConsolidationIncentives.sol` or `src/lib/SSZMerkleVerifier.sol`
+2. Build: `forge build`
+3. Run tests: `forge test`
+4. Format: `forge fmt`
+5. Gas snapshot: `forge snapshot`
+
+### Updating Test Vectors
+
+When beacon state structure changes:
+
+1. Update Rust types in `../prover/crates/proof-gen/src/types.rs`
+2. Regenerate vectors: `cd ../prover && cargo run --bin generate-test-vectors`
+3. Run Solidity tests: `cd ../contracts && forge test`
+
+## Related Documentation
+
+- **Deployment:** `DEPLOYMENT.md` — Full deployment guide with security checklist
+- **Project Plan:** `../PLAN.md` — 19-step implementation plan
+- **Project Status:** `../STATUS.md` — Component completion status
+- **Proof Service:** `../prover/README.md` — Rust proof generation service
+- **Real Chain Testing:** `../REAL_CHAIN_TESTING.md` — Testing against live beacon data
+
+## Resources
+
+- **Foundry Book:** https://book.getfoundry.sh/
+- **EIP-4788:** https://eips.ethereum.org/EIPS/eip-4788
+- **EIP-7251:** https://eips.ethereum.org/EIPS/eip-7251 (Consolidations)
+- **SSZ Spec:** https://github.com/ethereum/consensus-specs/blob/dev/ssz/simple-serialize.md
+- **Gnosis Chain Docs:** https://docs.gnosischain.com/
+
+## License
+
+MIT
