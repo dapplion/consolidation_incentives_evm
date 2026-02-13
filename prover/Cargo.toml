@@ -3,6 +3,7 @@ members = [
     "crates/proof-gen",
     "crates/service",
     "crates/test-vectors",
+    "crates/real-chain-test",
 ]
 resolver = "2"
 

@@ -1,0 +1,18 @@
+[package]
+name = "real-chain-test"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+proof-gen = { path = "../proof-gen" }
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+hex.workspace = true
+ssz_rs.workspace = true
+
+[[bin]]
+name = "fetch-and-prove"
+path = "src/main.rs"

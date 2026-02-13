@@ -504,8 +504,8 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 15 | ⬜ | Rust integration tests | End-to-end pipeline tests (deferred - needs production data) |
 | 16 | ✅ | `Deploy.s.sol` | Deployment script |
 | 17 | ✅ | Dune queries | Analytics SQL (5 queries + README) |
-| 18 | ⬜ | Real chain proof testing | Generate proofs against live Gnosis beacon state |
-| 19 | ⬜ | Local devnet validation | Deploy contract to local devnet, verify real proofs work |
+| 18 | 🔸 | Real chain proof testing | Binary created, blocked on debug API access (see REAL_CHAIN_TESTING.md) |
+| 19 | ⬜ | Local devnet validation | Deferred until Step 18 complete (see REAL_CHAIN_TESTING.md) |
 
 ### Progress Notes
 
@@ -617,6 +617,19 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
   - Dashboard layout recommendations
 - All queries ready to use once contract is deployed and decoded on Dune
 - **PROJECT COMPLETE**: All 17 steps finished (15 completed, 11+13+15 deferred to production)
+
+**2026-02-13 (early morning):** Step 18 partially completed - Real chain testing binary
+- Created `prover/crates/real-chain-test/`: Rust binary to fetch real Gnosis beacon data
+- Successfully tested against Gnosis public beacon endpoint
+- Confirmed ability to fetch finalized checkpoints and block headers
+- **Blocked**: Public endpoints don't expose `/eth/v2/debug/beacon/states` (debug API)
+- Need SSH tunnel to internal beacon node OR local Gnosis node sync
+- Documented status and options in `REAL_CHAIN_TESTING.md`
+- **Decision**: Defer full state testing to deployment phase
+  - Synthetic test vectors sufficient for contract validation (62 Solidity tests passing)
+  - Real chain testing most valuable during actual deployment
+  - Can use Chiado testnet first for live testing
+- Steps 18-19 marked as partially complete, deferred to production
 
 **2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
 - **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
