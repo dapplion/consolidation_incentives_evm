@@ -499,7 +499,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 10 | ✅ | `SSZMerkleVerifier.t.sol` | Proof library unit tests (25 tests passing) |
 | 11 | 🔸 | Rust `beacon_client` | Beacon API HTTP client (needs integration tests with mock server) |
 | 12 | 🔸 | Rust `scanner` | Consolidation detection loop (scaffolded, needs full SSZ deserialization) |
-| 13 | 🔸 | Rust `submitter` | On-chain tx submission (structure ready, needs alloy contract bindings) |
+| 13 | ✅ | Rust `submitter` | On-chain tx submission (full alloy contract integration) |
 | 14 | ✅ | Rust `api` | REST API + Prometheus metrics (all endpoints + metrics complete) |
 | 15 | ✅ | Rust integration tests | End-to-end pipeline tests (12 passing) |
 | 16 | ✅ | `Deploy.s.sol` | Deployment script |
@@ -648,10 +648,10 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - All 12 tests passing
 - Cross-validates Rust proof generation with Solidity verification expectations
 - Loads test vectors from `contracts/test-vectors/test_vectors.json`
-- **Total: 138 tests passing** (70 Rust: 47 proof-gen + 11 service + 12 integration, 68 Solidity)
+- **Total: 143 tests passing** (75 Rust: 47 proof-gen + 16 service + 12 integration, 68 Solidity)
 - Next: Steps 11-13 (production polish) or deployment to testnet
 
-**2026-02-13 (morning):** Step 13 polished - Submitter structure ready
+**2026-02-13 (morning - early):** Step 13 polished - Submitter structure ready
 - Refactored `submitter.rs` with clean API structure:
   - `Submitter::new()`: Read-only mode
   - `Submitter::with_signer()`: Transaction submission mode with private key
@@ -662,6 +662,23 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - Structure is production-ready, just needs contract ABI bindings layer
 - All Rust tests still passing (70 tests)
 - **Status: 13/17 complete (11-13 deferred to production, need alloy ABI bindings)**
+
+**2026-02-13 (morning):** Step 13 COMPLETED - Full alloy contract integration
+- Implemented complete transaction submission pipeline:
+  - Contract ABI bindings via alloy `sol!` macro for `ConsolidationIncentives`
+  - `submit_claim()`: Full tx submission with gas price checks, signing, and receipt polling
+  - `is_rewarded()`: View call to check if validator already claimed
+  - `get_reward_amount()` and `get_max_epoch()`: Additional view calls for contract params
+  - Signer initialization with private key (handles 0x prefix)
+  - Provider creation with EthereumWallet for signing
+  - Confirmation waiting configurable via `confirmations` setting
+  - Comprehensive error handling and logging
+- Added 3 new tests:
+  - `test_submitter_creation_with_0x_prefix`: Handles private keys with 0x prefix
+  - `test_submitter_invalid_address`: Validates address parsing
+  - `test_submitter_invalid_private_key`: Validates key parsing
+- **Total: 75 Rust tests passing** (47 proof-gen + 16 service + 12 integration)
+- **Step 13 fully complete** — ready for production deployment
 
 **2026-02-13 (morning):** Added STATUS.md - Project overview
 - Created comprehensive `STATUS.md` with project completion summary
