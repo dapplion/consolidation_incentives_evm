@@ -501,7 +501,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 12 | 🔸 | Rust `scanner` | Consolidation detection loop (scaffolded, needs full SSZ deserialization) |
 | 13 | 🔸 | Rust `submitter` | On-chain tx submission (scaffolded, needs alloy integration) |
 | 14 | ✅ | Rust `api` | REST API + Prometheus metrics (all endpoints + metrics complete) |
-| 15 | ⬜ | Rust integration tests | End-to-end pipeline tests (deferred - needs production data) |
+| 15 | ✅ | Rust integration tests | End-to-end pipeline tests (12 passing) |
 | 16 | ✅ | `Deploy.s.sol` | Deployment script |
 | 17 | ✅ | Dune queries | Analytics SQL (5 queries + README) |
 | 18 | 🔸 | Real chain proof testing | Binary created, blocked on debug API access (see REAL_CHAIN_TESTING.md) |
@@ -630,6 +630,26 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
   - Real chain testing most valuable during actual deployment
   - Can use Chiado testnet first for live testing
 - Steps 18-19 marked as partially complete, deferred to production
+
+**2026-02-13 (early morning):** Step 15 completed - Rust integration tests
+- Created `integration-tests` crate with 12 tests:
+  - `test_load_test_vectors`: Validates test vector file loading
+  - `test_valid_claim_proof_lengths`: Verifies all valid claims have correct proof lengths (29 consolidation, 53 validator)
+  - `test_valid_claim_proof_format`: Validates hex encoding, credential prefixes, recipient addresses
+  - `test_invalid_claims_have_descriptions`: Ensures all invalid claims document expected errors
+  - `test_proof_lengths_match_gindex_depth`: Cross-validates gindex depth == proof length
+  - `test_gindex_calculator_consistency`: Verifies deterministic gindex computation
+  - `test_gindex_depth_calculation`: Validates log2(gindex) == expected depth
+  - `test_proof_bundle_serialization`: JSON roundtrip testing
+  - `test_cross_validate_test_vectors_structure`: Validates test vector structure matches ProofGenerator expectations
+  - `test_all_valid_claims_eligible`: Confirms valid claims satisfy activation_epoch < maxEpoch
+  - `test_invalid_claims_variety`: Ensures comprehensive coverage (tampered, wrong fields, ineligible, BLS, swapped)
+  - `test_gindex_increasing_for_sequential_indices`: Validates SSZ tree structure (consolidations +2, validators +8)
+- All 12 tests passing
+- Cross-validates Rust proof generation with Solidity verification expectations
+- Loads test vectors from `contracts/test-vectors/test_vectors.json`
+- **Total: 138 tests passing** (70 Rust: 47 proof-gen + 11 service + 12 integration, 68 Solidity)
+- Next: Steps 11-13 (production polish) or deployment to testnet
 
 **2026-02-12 (evening):** Step 7 completed - Proof generation with sparse Merkle proofs
 - **Problem solved**: ssz_rs's `Prove` trait on `List<T, 2^40>` tries to allocate 140TB for the full
