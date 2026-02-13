@@ -4,6 +4,7 @@ members = [
     "crates/service",
     "crates/test-vectors",
     "crates/real-chain-test",
+    "crates/integration-tests",
 ]
 resolver = "2"
 
