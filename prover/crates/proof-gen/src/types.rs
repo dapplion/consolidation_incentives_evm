@@ -96,6 +96,17 @@ pub struct Validator {
     pub withdrawable_epoch: u64,
 }
 
+/// Minimal validator info needed for reward claims (JSON-serializable)
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ValidatorInfo {
+    /// Withdrawal credentials (32 bytes)
+    #[serde(with = "hex_bytes32")]
+    pub withdrawal_credentials: [u8; 32],
+
+    /// Activation epoch
+    pub activation_epoch: u64,
+}
+
 /// Beacon block header
 #[derive(Debug, Clone, Default, PartialEq, Eq, SimpleSerialize)]
 pub struct BeaconBlockHeader {

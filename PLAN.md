@@ -807,3 +807,9 @@ This is the final validation before mainnet deployment.
 - 150 tests passing, all documentation complete
 - Ready for deployment phase when infrastructure available
 - Next: Chiado testnet deployment (see NEXT_STEPS.md)
+
+**2026-02-20:** Step 12 improvement — scanner now uses standard Electra Beacon API endpoints
+- Implemented `GET /eth/v1/beacon/states/{state_id}/pending_consolidations` client support
+- Implemented `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}` minimal client support
+- Scanner now detects new consolidations on each finalized epoch without requiring debug SSZ endpoint
+- Service now starts scanner by default (detection-only; proof+submission still require deployed contract + proof generation)

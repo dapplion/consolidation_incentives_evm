@@ -2,7 +2,7 @@
 //!
 //! Fetches beacon state data from a Gnosis beacon node.
 
-use crate::types::{BeaconBlockHeader, FinalityCheckpoints};
+use crate::types::{BeaconBlockHeader, FinalityCheckpoints, PendingConsolidationJson, ValidatorInfo};
 use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
@@ -191,6 +191,135 @@ impl BeaconClient {
     pub async fn get_head_slot(&self) -> Result<u64, BeaconClientError> {
         let header = self.get_header("head").await?;
         Ok(header.slot)
+    }
+
+    /// Fetch pending consolidations for a given state
+    ///
+    /// Uses the standard (non-debug) Beacon API endpoint introduced in Electra:
+    /// `GET /eth/v1/beacon/states/{state_id}/pending_consolidations`
+    ///
+    /// # Errors
+    /// Returns error if the request fails or response is invalid
+    #[instrument(skip(self))]
+    pub async fn get_pending_consolidations(
+        &self,
+        state_id: &str,
+    ) -> Result<Vec<PendingConsolidationJson>, BeaconClientError> {
+        let url = format!(
+            "{}/eth/v1/beacon/states/{state_id}/pending_consolidations",
+            self.base_url
+        );
+
+        let response = self.client.get(&url).send().await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BeaconClientError::InvalidResponse(format!(
+                "pending_consolidations not found for state_id={state_id}"
+            )));
+        }
+
+        if !response.status().is_success() {
+            return Err(BeaconClientError::InvalidResponse(format!(
+                "Unexpected status: {}",
+                response.status()
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct PendingConsolidationsResponse {
+            data: Vec<PendingConsolidationEntry>,
+        }
+
+        #[derive(Deserialize)]
+        struct PendingConsolidationEntry {
+            source_index: String,
+            target_index: String,
+        }
+
+        let resp: PendingConsolidationsResponse = response.json().await?;
+
+        let mut out = Vec::with_capacity(resp.data.len());
+        for entry in resp.data {
+            out.push(PendingConsolidationJson {
+                source_index: entry.source_index.parse().map_err(|e| {
+                    BeaconClientError::InvalidResponse(format!(
+                        "Invalid source_index: {e}"
+                    ))
+                })?,
+                target_index: entry.target_index.parse().map_err(|e| {
+                    BeaconClientError::InvalidResponse(format!(
+                        "Invalid target_index: {e}"
+                    ))
+                })?,
+            });
+        }
+
+        Ok(out)
+    }
+
+    /// Fetch minimal validator info for a given state and validator index
+    ///
+    /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
+    ///
+    /// # Errors
+    /// Returns error if request fails or response is invalid
+    #[instrument(skip(self))]
+    pub async fn get_validator_info(
+        &self,
+        state_id: &str,
+        validator_id: u64,
+    ) -> Result<ValidatorInfo, BeaconClientError> {
+        let url = format!(
+            "{}/eth/v1/beacon/states/{state_id}/validators/{validator_id}",
+            self.base_url
+        );
+
+        let response = self.client.get(&url).send().await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(BeaconClientError::InvalidResponse(format!(
+                "validator {validator_id} not found for state_id={state_id}"
+            )));
+        }
+
+        if !response.status().is_success() {
+            return Err(BeaconClientError::InvalidResponse(format!(
+                "Unexpected status: {}",
+                response.status()
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct ValidatorResponse {
+            data: ValidatorData,
+        }
+
+        #[derive(Deserialize)]
+        struct ValidatorData {
+            validator: ValidatorInner,
+        }
+
+        #[derive(Deserialize)]
+        struct ValidatorInner {
+            withdrawal_credentials: String,
+            activation_epoch: String,
+        }
+
+        let resp: ValidatorResponse = response.json().await?;
+
+        Ok(ValidatorInfo {
+            withdrawal_credentials: parse_hex32(&resp.data.validator.withdrawal_credentials)?,
+            activation_epoch: resp
+                .data
+                .validator
+                .activation_epoch
+                .parse()
+                .map_err(|e| {
+                    BeaconClientError::InvalidResponse(format!(
+                        "Invalid activation_epoch: {e}"
+                    ))
+                })?,
+        })
     }
 }
 
@@ -414,5 +543,75 @@ mod tests {
         let result = client.get_header("12345").await;
         
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_pending_consolidations() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let response_json = r#"{
+            "data": [
+                {"source_index": "42", "target_index": "100"},
+                {"source_index": "7", "target_index": "8"}
+            ]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/eth/v1/beacon/states/12345/pending_consolidations",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_pending_consolidations("12345").await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].source_index, 42);
+        assert_eq!(result[0].target_index, 100);
+        assert_eq!(result[1].source_index, 7);
+        assert_eq!(result[1].target_index, 8);
+    }
+
+    #[tokio::test]
+    async fn test_get_validator_info() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let response_json = r#"{
+            "data": {
+                "index": "42",
+                "balance": "32000000000",
+                "status": "active_ongoing",
+                "validator": {
+                    "pubkey": "0x00",
+                    "withdrawal_credentials": "0x0101010101010101010101010101010101010101010101010101010101010101",
+                    "effective_balance": "32000000000",
+                    "slashed": false,
+                    "activation_eligibility_epoch": "0",
+                    "activation_epoch": "123",
+                    "exit_epoch": "18446744073709551615",
+                    "withdrawable_epoch": "18446744073709551615"
+                }
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/finalized/validators/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let info = client.get_validator_info("finalized", 42).await.unwrap();
+
+        assert_eq!(info.activation_epoch, 123);
+        assert_eq!(info.withdrawal_credentials[0], 0x01);
     }
 }

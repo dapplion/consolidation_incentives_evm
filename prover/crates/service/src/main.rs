@@ -63,7 +63,21 @@ async fn main() -> Result<()> {
     // Start API server
     let api_handle = tokio::spawn(api::run_server(args.listen.clone(), app_state.clone()));
 
-    // TODO: Start scanner and submitter when contract is deployed
+    // Start beacon scanner (detection only; proof+submission require deployed contract)
+    let scanner = scanner::Scanner::new(
+        scanner::ScannerConfig {
+            beacon_url: args.beacon_url.clone(),
+            ..Default::default()
+        },
+        app_state.clone(),
+    );
+    let scanner_handle = tokio::spawn(async move {
+        if let Err(e) = scanner.run().await {
+            tracing::error!(error = %e, "Scanner exited");
+        }
+    });
+
+    // TODO: Start submitter when contract is deployed
 
     // Wait for shutdown
     tokio::select! {
@@ -74,6 +88,9 @@ async fn main() -> Result<()> {
             if let Err(e) = result {
                 tracing::error!(error = %e, "API server error");
             }
+        }
+        _ = scanner_handle => {
+            // Scanner task logs its own errors.
         }
     }
 

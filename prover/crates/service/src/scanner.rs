@@ -4,10 +4,11 @@
 
 use crate::state::{AppState, ClaimStatus, ConsolidationRecord};
 use anyhow::Result;
-use proof_gen::BeaconClient;
+use proof_gen::{BeaconClient, PendingConsolidationJson};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 
 /// Scanner configuration
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ pub struct Scanner {
     config: ScannerConfig,
     client: BeaconClient,
     state: AppState,
+    last_finalized_epoch: AtomicU64,
 }
 
 impl Scanner {
@@ -45,6 +47,7 @@ impl Scanner {
             config,
             client,
             state,
+            last_finalized_epoch: AtomicU64::new(0),
         }
     }
 
@@ -80,16 +83,49 @@ impl Scanner {
         self.state.set_current_slot(finalized_slot);
         self.state.set_current_epoch(finalized_epoch);
 
-        // TODO: Fetch state and extract pending_consolidations
-        // This will be implemented when we have full SSZ deserialization
+        // Only process each finalized epoch once
+        let last = self.last_finalized_epoch.load(Ordering::Relaxed);
+        if finalized_epoch <= last {
+            return Ok(());
+        }
+
+        // NOTE: This uses the standard Beacon API endpoint introduced in Electra.
+        // This avoids requiring the debug SSZ state endpoint.
+        let consolidations = self
+            .client
+            .get_pending_consolidations(&finalized_slot.to_string())
+            .await?;
+
+        if consolidations.is_empty() {
+            info!(epoch = finalized_epoch, "No pending consolidations");
+        } else {
+            info!(
+                epoch = finalized_epoch,
+                count = consolidations.len(),
+                "Fetched pending consolidations"
+            );
+            self.process_consolidations(consolidations, finalized_epoch);
+        }
+
+        self.last_finalized_epoch
+            .store(finalized_epoch, Ordering::Relaxed);
 
         Ok(())
     }
 
     /// Process new consolidations found in beacon state
     #[allow(dead_code)]
-    fn process_consolidations(&self, consolidations: Vec<(u64, u64)>, epoch: u64) {
-        for (source_index, target_index) in consolidations {
+    fn process_consolidations(
+        &self,
+        consolidations: Vec<PendingConsolidationJson>,
+        epoch: u64,
+    ) {
+        for PendingConsolidationJson {
+            source_index,
+            target_index,
+        } in consolidations
+        {
+
             // Skip if already tracked
             if self.state.get_consolidation(source_index).is_some() {
                 continue;
