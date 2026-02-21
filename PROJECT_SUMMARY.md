@@ -1,8 +1,8 @@
 # Consolidation Incentives EVM - Project Summary
 
-**Status:** MVP Complete (2026-02-13)  
+**Status:** MVP Complete (2026-02-13, verified 2026-02-21)  
 **Total Development Time:** ~24 hours  
-**Tests Passing:** 150 (82 Rust + 68 Solidity)
+**Tests Passing:** 152 (84 Rust + 68 Solidity)
 
 ---
 
@@ -65,8 +65,8 @@ A complete, production-ready system for incentivizing Gnosis Chain validator con
 | `test-vectors` | ~300 | - | JSON test vector generator |
 | `integration-tests` | ~400 | 12 | Cross-component validation |
 
-**Test Coverage:** High (82 tests)
-- 54 proof-gen tests (sparse proofs, gindex computation, beacon client)
+**Test Coverage:** High (84 tests)
+- 56 proof-gen tests (sparse proofs, gindex computation, beacon client)
 - 16 service tests (API endpoints, metrics, submitter)
 - 12 integration tests (test vector validation, cross-component)
 
@@ -193,9 +193,9 @@ A complete, production-ready system for incentivizing Gnosis Chain validator con
 
 ### Tests
 
-- **Solidity:** 68 tests (SSZMerkleVerifier 40 + ConsolidationIncentives 22 + Deploy 6)
-- **Rust:** 82 tests (proof-gen 54 + service 16 + integration 12)
-- **Total:** 150 tests
+- **Solidity:** 68 tests (SSZMerkleVerifier 25 + ConsolidationIncentives 15 + Vectors 22 + Deploy 6)
+- **Rust:** 84 tests (proof-gen 56 + service 16 + integration 12)
+- **Total:** 152 tests
 
 ---
 

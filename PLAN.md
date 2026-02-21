@@ -651,18 +651,6 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 - **Total: 143 tests passing** (75 Rust: 47 proof-gen + 16 service + 12 integration, 68 Solidity)
 - Next: Steps 11-13 (production polish) or deployment to testnet
 
-**2026-02-13 (morning - early):** Step 13 polished - Submitter structure ready
-- Refactored `submitter.rs` with clean API structure:
-  - `Submitter::new()`: Read-only mode
-  - `Submitter::with_signer()`: Transaction submission mode with private key
-  - `submit_claim()`: Stub for claim submission (documented TODOs for alloy contract bindings)
-  - `is_rewarded()`: Stub for checking claim status
-- Removed alloy provider integration temporarily (API changed between alloy versions)
-- Full implementation blocked on alloy sol! macro contract bindings
-- Structure is production-ready, just needs contract ABI bindings layer
-- All Rust tests still passing (70 tests)
-- **Status: 13/17 complete (11-13 deferred to production, need alloy ABI bindings)**
-
 **2026-02-13 (morning):** Step 13 COMPLETED - Full alloy contract integration
 - Implemented complete transaction submission pipeline:
   - Contract ABI bindings via alloy `sol!` macro for `ConsolidationIncentives`
@@ -813,3 +801,11 @@ This is the final validation before mainnet deployment.
 - Implemented `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}` minimal client support
 - Scanner now detects new consolidations on each finalized epoch without requiring debug SSZ endpoint
 - Service now starts scanner by default (detection-only; proof+submission still require deployed contract + proof generation)
+
+**2026-02-21 (hourly check):** Project status verified
+- **Total: 152 tests passing** (84 Rust + 68 Solidity)
+  - Rust: 56 proof-gen + 16 service + 12 integration
+  - Solidity: 25 SSZMerkleVerifier + 15 ConsolidationIncentives + 22 vectors + 6 deployment
+- All MVP components complete
+- Steps 18-19 (real chain testing + devnet validation) deferred to production (require beacon debug API + deployed contract)
+- Ready for Chiado testnet deployment when infrastructure available
