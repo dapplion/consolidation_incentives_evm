@@ -809,3 +809,11 @@ This is the final validation before mainnet deployment.
 - All MVP components complete
 - Steps 18-19 (real chain testing + devnet validation) deferred to production (require beacon debug API + deployed contract)
 - Ready for Chiado testnet deployment when infrastructure available
+
+**2026-02-27 (hourly check):** Fixed preset feature configuration bug
+- **Issue found**: Integration tests were failing with preset mismatch (expected 29-element proofs, got 17)
+- **Root cause**: `integration-tests` crate was missing `features = ["gnosis"]` on `proof-gen` dependency
+- When running `cargo test --all-features`, both `gnosis` and `minimal` features were enabled, and `minimal` took precedence
+- **Fix**: Added `features = ["gnosis"]` to integration-tests/Cargo.toml and run tests with default features (not --all-features)
+- **Verification**: All 152 tests passing (84 Rust + 68 Solidity)
+- Project stable and ready for deployment

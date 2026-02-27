@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-proof-gen = { path = "../proof-gen" }
+proof-gen = { path = "../proof-gen", features = ["gnosis"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
