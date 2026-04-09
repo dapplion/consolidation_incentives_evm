@@ -1,34 +1,7 @@
 use anyhow::{Context, Result};
 use proof_gen::beacon_client::BeaconClient;
-use serde::Serialize;
 use ssz_rs::HashTreeRoot;
 use std::fs;
-
-#[derive(Debug, Serialize)]
-struct RealChainTestVector {
-    description: String,
-    source: String,
-    slot: u64,
-    beacon_timestamp: u64,
-    block_root: String,
-    state_root: String,
-    validators_count: usize,
-    consolidations_count: usize,
-    claims: Vec<ClaimData>,
-}
-
-#[derive(Debug, Serialize)]
-struct ClaimData {
-    consolidation_index: u64,
-    source_index: u64,
-    target_index: u64,
-    activation_epoch: u64,
-    source_credentials: String,
-    proof_consolidation: Vec<String>,
-    proof_credentials: Vec<String>,
-    proof_activation_epoch: Vec<String>,
-    expected_recipient: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,38 +16,55 @@ async fn main() -> Result<()> {
 
     // Get current finalized checkpoint
     println!("📍 Fetching finalized checkpoint...");
-    let finality = client.get_finality_checkpoints().await
+    let finality = client
+        .get_finality_checkpoints()
+        .await
         .context("Failed to fetch finality checkpoints")?;
-    
+
     let finalized_slot = finality.finalized_epoch * 16; // Gnosis: 16 slots per epoch
     println!("   Finalized epoch: {}", finality.finalized_epoch);
     println!("   Finalized slot: {}", finalized_slot);
-    println!("   Finalized root: 0x{}\n", hex::encode(&finality.finalized_root));
+    println!(
+        "   Finalized root: 0x{}\n",
+        hex::encode(finality.finalized_root)
+    );
 
     // Fetch the beacon block header at finalized slot
-    println!("📦 Fetching beacon block header at slot {}...", finalized_slot);
+    println!(
+        "📦 Fetching beacon block header at slot {}...",
+        finalized_slot
+    );
     let block_id = format!("{}", finalized_slot);
-    let header = client.get_header(&block_id).await
+    let header = client
+        .get_header(&block_id)
+        .await
         .context("Failed to fetch beacon block header")?;
-    
-    let block_root = header.hash_tree_root()
+
+    let block_root = header
+        .hash_tree_root()
         .map_err(|e| anyhow::anyhow!("Failed to compute block root: {:?}", e))?;
-    
-    println!("   State root: 0x{}", hex::encode(&header.state_root));
-    println!("   Block root: 0x{}\n", hex::encode(&block_root));
+
+    println!("   State root: 0x{}", hex::encode(header.state_root));
+    println!("   Block root: 0x{}\n", hex::encode(block_root));
 
     // Fetch the full beacon state in SSZ format
     println!("🌲 Fetching beacon state SSZ (this may take a moment)...");
     let state_id = format!("{}", finalized_slot);
-    let state_ssz = client.get_state_ssz(&state_id).await
+    let state_ssz = client
+        .get_state_ssz(&state_id)
+        .await
         .context("Failed to fetch state SSZ")?;
-    
-    println!("   State size: {} bytes ({:.2} MB)\n", state_ssz.len(), state_ssz.len() as f64 / 1_000_000.0);
+
+    println!(
+        "   State size: {} bytes ({:.2} MB)\n",
+        state_ssz.len(),
+        state_ssz.len() as f64 / 1_000_000.0
+    );
 
     // Parse the SSZ state
     // Note: We need to extract just validators and pending_consolidations
     // Full deserialization of Electra BeaconState is complex, so we'll use a targeted approach
-    
+
     println!("⚠️  Full BeaconState SSZ deserialization requires complete Electra schema");
     println!("    For now, we'll demonstrate the proof pipeline with the header data.\n");
 
@@ -85,8 +75,8 @@ async fn main() -> Result<()> {
     println!("📊 Summary:");
     println!("   Slot: {}", finalized_slot);
     println!("   Beacon timestamp: {}", beacon_timestamp);
-    println!("   Block root: 0x{}", hex::encode(&block_root));
-    println!("   State root: 0x{}", hex::encode(&header.state_root));
+    println!("   Block root: 0x{}", hex::encode(block_root));
+    println!("   State root: 0x{}", hex::encode(header.state_root));
     println!("\n✅ Successfully fetched real Gnosis beacon chain data!");
     println!("\n📝 Next steps:");
     println!("   1. Implement full Electra BeaconState SSZ deserialization");
@@ -101,8 +91,8 @@ async fn main() -> Result<()> {
         "finalized_epoch": finality.finalized_epoch,
         "finalized_slot": finalized_slot,
         "beacon_timestamp": beacon_timestamp,
-        "block_root": format!("0x{}", hex::encode(&block_root)),
-        "state_root": format!("0x{}", hex::encode(&header.state_root)),
+        "block_root": format!("0x{}", hex::encode(block_root)),
+        "state_root": format!("0x{}", hex::encode(header.state_root)),
         "state_size_bytes": state_ssz.len(),
         "note": "Full BeaconState deserialization pending - requires complete Electra SSZ schema"
     });

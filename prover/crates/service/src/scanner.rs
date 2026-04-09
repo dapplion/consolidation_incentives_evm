@@ -115,17 +115,12 @@ impl Scanner {
 
     /// Process new consolidations found in beacon state
     #[allow(dead_code)]
-    fn process_consolidations(
-        &self,
-        consolidations: Vec<PendingConsolidationJson>,
-        epoch: u64,
-    ) {
+    fn process_consolidations(&self, consolidations: Vec<PendingConsolidationJson>, epoch: u64) {
         for PendingConsolidationJson {
             source_index,
             target_index,
         } in consolidations
         {
-
             // Skip if already tracked
             if self.state.get_consolidation(source_index).is_some() {
                 continue;

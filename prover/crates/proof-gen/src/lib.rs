@@ -27,8 +27,8 @@ pub mod state_prover;
 pub mod types;
 
 pub use beacon_client::BeaconClient;
-pub use beacon_state::{MinimalBeaconState, BeaconBlockHeader as FullBeaconBlockHeader};
+pub use beacon_state::{BeaconBlockHeader as FullBeaconBlockHeader, MinimalBeaconState};
 pub use gindex::GindexCalculator;
-pub use proof::{ConsolidationProofBundle, ProofGenerator, ProofError};
+pub use proof::{ConsolidationProofBundle, ProofError, ProofGenerator};
 pub use state_prover::StateProver;
 pub use types::*;

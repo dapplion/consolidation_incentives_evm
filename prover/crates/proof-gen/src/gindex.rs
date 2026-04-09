@@ -50,7 +50,7 @@ impl GindexCalculator {
 
     // source_index is field index 0
     const SOURCE_INDEX_FIELD_INDEX: u64 = 0;
-    
+
     // Test state limits (MinimalBeaconState)
     /// Validators tree depth for test state: log2(1024) = 10
     pub const TEST_VALIDATORS_TREE_DEPTH: u32 = 10;
@@ -183,11 +183,11 @@ impl GindexCalculator {
         let gindex = Self::consolidation_source_gindex(0);
         Self::gindex_depth(gindex)
     }
-    
+
     // =========================================================================
     // Test State Methods (for MinimalBeaconState with small limits)
     // =========================================================================
-    
+
     /// Compute gindex for consolidation source_index using test state limits
     #[must_use]
     pub fn test_consolidation_source_gindex(consolidation_index: u64) -> u64 {
@@ -207,7 +207,7 @@ impl GindexCalculator {
             source_in_consolidation,
         ])
     }
-    
+
     /// Compute gindex for validator credentials using test state limits
     #[must_use]
     pub fn test_validator_credentials_gindex(validator_index: u64) -> u64 {
@@ -226,7 +226,7 @@ impl GindexCalculator {
             credentials_in_validator,
         ])
     }
-    
+
     /// Compute gindex for validator activation_epoch using test state limits
     #[must_use]
     pub fn test_validator_activation_epoch_gindex(validator_index: u64) -> u64 {
@@ -245,19 +245,27 @@ impl GindexCalculator {
             activation_in_validator,
         ])
     }
-    
+
     /// Expected proof length for consolidation in test state
     #[must_use]
     pub fn test_consolidation_proof_length() -> u32 {
         // header (3) + state (6) + list (1) + data (6) + field (1) = 17
-        Self::HEADER_TREE_DEPTH + Self::BEACON_STATE_TREE_DEPTH + 1 + Self::TEST_CONSOLIDATIONS_TREE_DEPTH + Self::CONSOLIDATION_TREE_DEPTH
+        Self::HEADER_TREE_DEPTH
+            + Self::BEACON_STATE_TREE_DEPTH
+            + 1
+            + Self::TEST_CONSOLIDATIONS_TREE_DEPTH
+            + Self::CONSOLIDATION_TREE_DEPTH
     }
-    
+
     /// Expected proof length for validator fields in test state
     #[must_use]
     pub fn test_validator_proof_length() -> u32 {
         // header (3) + state (6) + list (1) + data (10) + field (3) = 23
-        Self::HEADER_TREE_DEPTH + Self::BEACON_STATE_TREE_DEPTH + 1 + Self::TEST_VALIDATORS_TREE_DEPTH + Self::VALIDATOR_TREE_DEPTH
+        Self::HEADER_TREE_DEPTH
+            + Self::BEACON_STATE_TREE_DEPTH
+            + 1
+            + Self::TEST_VALIDATORS_TREE_DEPTH
+            + Self::VALIDATOR_TREE_DEPTH
     }
 
     /// Expected proof length for validator fields

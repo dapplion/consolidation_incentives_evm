@@ -112,19 +112,10 @@ pub struct HistoricalSummary {
 }
 
 /// Sync committee (Altair+)
-#[derive(Debug, Clone, PartialEq, Eq, SimpleSerialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, SimpleSerialize)]
 pub struct SyncCommittee {
     pub pubkeys: Vector<Vector<u8, 48>, 512>, // SYNC_COMMITTEE_SIZE
     pub aggregate_pubkey: Vector<u8, 48>,
-}
-
-impl Default for SyncCommittee {
-    fn default() -> Self {
-        Self {
-            pubkeys: Default::default(),
-            aggregate_pubkey: Vector::default(),
-        }
-    }
 }
 
 // ============================================================================
@@ -185,7 +176,7 @@ pub struct ExecutionPayloadHeaderMinimal {
 /// **Important**: The proof lengths from this state differ from mainnet/gnosis:
 /// - Validators tree depth: 10 (vs 40 on mainnet)  
 /// - Pending consolidations tree depth: 6 (vs 18 on gnosis)
-#[derive(Debug, Clone, PartialEq, Eq, SimpleSerialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, SimpleSerialize)]
 pub struct MinimalBeaconState {
     // Field 0: Genesis time
     pub genesis_time: u64,
@@ -263,62 +254,18 @@ pub struct MinimalBeaconState {
     pub pending_consolidations: List<PendingConsolidation, 64>,
 }
 
-impl Default for MinimalBeaconState {
-    fn default() -> Self {
-        Self {
-            genesis_time: 0,
-            genesis_validators_root: [0u8; 32],
-            slot: 0,
-            fork: Fork::default(),
-            latest_block_header: BeaconBlockHeader::default(),
-            block_roots: Default::default(),
-            state_roots: Default::default(),
-            historical_roots: Default::default(),
-            eth1_data: Eth1Data::default(),
-            eth1_data_votes: Default::default(),
-            eth1_deposit_index: 0,
-            validators: Default::default(),
-            balances: Default::default(),
-            randao_mixes: Default::default(),
-            slashings: Default::default(),
-            previous_epoch_participation: Default::default(),
-            current_epoch_participation: Default::default(),
-            justification_bits: Default::default(),
-            previous_justified_checkpoint: Checkpoint::default(),
-            current_justified_checkpoint: Checkpoint::default(),
-            finalized_checkpoint: Checkpoint::default(),
-            inactivity_scores: Default::default(),
-            current_sync_committee: SyncCommittee::default(),
-            next_sync_committee: SyncCommittee::default(),
-            latest_execution_payload_header: ExecutionPayloadHeaderMinimal::default(),
-            next_withdrawal_index: 0,
-            next_withdrawal_validator_index: 0,
-            historical_summaries: Default::default(),
-            deposit_requests_start_index: 0,
-            deposit_balance_to_consume: 0,
-            exit_balance_to_consume: 0,
-            earliest_exit_epoch: 0,
-            consolidation_balance_to_consume: 0,
-            earliest_consolidation_epoch: 0,
-            pending_deposits: Default::default(),
-            pending_partial_withdrawals: Default::default(),
-            pending_consolidations: Default::default(),
-        }
-    }
-}
-
 impl MinimalBeaconState {
     /// Tree depth for validators list: log2(1024) = 10
     pub const VALIDATORS_TREE_DEPTH: u32 = 10;
-    
+
     /// Tree depth for pending consolidations list: log2(64) = 6
     pub const PENDING_CONSOLIDATIONS_TREE_DEPTH: u32 = 6;
-    
+
     /// Get proof depth for validator fields (from state root)
     /// Path: state -> validators -> [i] -> field
     /// Depth: 6 (state) + 1 (list data root) + 10 (validators tree) + 3 (validator fields) = 20
     pub const VALIDATOR_PROOF_DEPTH_FROM_STATE: u32 = 6 + 1 + 10 + 3;
-    
+
     /// Get proof depth for consolidation fields (from state root)
     /// Path: state -> pending_consolidations -> [i] -> field
     /// Depth: 6 (state) + 1 (list data root) + 6 (consolidations tree) + 1 (consolidation fields) = 14
@@ -332,7 +279,7 @@ impl MinimalBeaconState {
 /// Tiny test BeaconState with very small list limits for unit testing.
 /// This avoids the huge memory allocations needed for full-size proofs.
 /// Note: This has 37 fields like the real Electra state for correct proof depths.
-#[derive(Debug, Clone, PartialEq, Eq, SimpleSerialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, SimpleSerialize)]
 pub struct TestBeaconState {
     // Field 0: genesis_time
     pub genesis_time: u64,
@@ -410,61 +357,19 @@ pub struct TestBeaconState {
     pub pending_consolidations: List<PendingConsolidation, 8>,
 }
 
-impl Default for TestBeaconState {
-    fn default() -> Self {
-        Self {
-            genesis_time: 0,
-            genesis_validators_root: [0u8; 32],
-            slot: 0,
-            fork: Fork::default(),
-            latest_block_header: BeaconBlockHeader::default(),
-            block_roots: Default::default(),
-            state_roots: Default::default(),
-            historical_roots: Default::default(),
-            eth1_data: Eth1Data::default(),
-            eth1_data_votes: Default::default(),
-            eth1_deposit_index: 0,
-            validators: Default::default(),
-            balances: Default::default(),
-            randao_mixes: Default::default(),
-            slashings: Default::default(),
-            previous_epoch_participation: Default::default(),
-            current_epoch_participation: Default::default(),
-            justification_bits: Default::default(),
-            previous_justified_checkpoint: Checkpoint::default(),
-            current_justified_checkpoint: Checkpoint::default(),
-            finalized_checkpoint: Checkpoint::default(),
-            inactivity_scores: Default::default(),
-            current_sync_committee_root: [0u8; 32],
-            next_sync_committee_root: [0u8; 32],
-            latest_execution_payload_header_root: [0u8; 32],
-            next_withdrawal_index: 0,
-            next_withdrawal_validator_index: 0,
-            historical_summaries: Default::default(),
-            deposit_requests_start_index: 0,
-            deposit_balance_to_consume: 0,
-            exit_balance_to_consume: 0,
-            earliest_exit_epoch: 0,
-            consolidation_balance_to_consume: 0,
-            earliest_consolidation_epoch: 0,
-            pending_deposits: Default::default(),
-            pending_partial_withdrawals: Default::default(),
-            pending_consolidations: Default::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_validator_hash_tree_root() {
-        let mut validator = Validator::default();
-        validator.effective_balance = 32_000_000_000;
-        validator.activation_epoch = 100;
+        let mut validator = Validator {
+            effective_balance: 32_000_000_000,
+            activation_epoch: 100,
+            ..Validator::default()
+        };
         validator.withdrawal_credentials[0] = 0x01;
-        
+
         let root = validator.hash_tree_root().expect("should hash");
         let root_bytes: [u8; 32] = root.into();
         assert_ne!(root_bytes, [0u8; 32]);
@@ -476,7 +381,7 @@ mod tests {
             source_index: 42,
             target_index: 100,
         };
-        
+
         let root = consolidation.hash_tree_root().expect("should hash");
         let root_bytes: [u8; 32] = root.into();
         assert_ne!(root_bytes, [0u8; 32]);
@@ -489,21 +394,21 @@ mod tests {
         let root_bytes: [u8; 32] = root.into();
         assert_ne!(root_bytes, [0u8; 32]);
     }
-    
+
     #[test]
     fn test_validator_proof() {
         let mut validator = Validator::default();
         validator.withdrawal_credentials[0] = 0x01;
         validator.withdrawal_credentials[12..32].copy_from_slice(&[0xab; 20]);
         validator.activation_epoch = 100;
-        
+
         // Prove withdrawal_credentials field
         let path: &[PathElement] = &["withdrawal_credentials".into()];
         let (proof, witness) = validator.prove(path).expect("should prove");
-        
+
         // Verify the proof
         proof.verify(witness).expect("proof should be valid");
-        
+
         // Check proof structure
         // Validator has 8 fields -> tree depth 3 (2^3 = 8)
         // withdrawal_credentials is field index 1 -> gindex = 8 + 1 = 9
@@ -512,16 +417,18 @@ mod tests {
 
     #[test]
     fn test_validator_activation_epoch_proof() {
-        let mut validator = Validator::default();
-        validator.activation_epoch = 12345;
-        
+        let validator = Validator {
+            activation_epoch: 12345,
+            ..Validator::default()
+        };
+
         // Prove activation_epoch field
         let path: &[PathElement] = &["activation_epoch".into()];
         let (proof, witness) = validator.prove(path).expect("should prove");
-        
+
         // Verify the proof
         proof.verify(witness).expect("proof should be valid");
-        
+
         // Check proof structure (activation_epoch is field index 5 -> gindex 8+5=13)
         assert_eq!(proof.index, 13);
     }
@@ -530,7 +437,7 @@ mod tests {
     fn test_state_with_validators_proof() {
         // Create a small state with a few validators
         let mut state = MinimalBeaconState::default();
-        
+
         for i in 0..5u8 {
             let mut validator = Validator::default();
             validator.withdrawal_credentials[0] = 0x01;
@@ -539,17 +446,17 @@ mod tests {
             state.validators.push(validator);
             state.balances.push(32_000_000_000);
         }
-        
+
         // Generate a proof for validators[2].withdrawal_credentials
         let path: &[PathElement] = &[
             "validators".into(),
             2usize.into(),
             "withdrawal_credentials".into(),
         ];
-        
+
         let (proof, witness) = state.prove(path).expect("should prove");
         proof.verify(witness).expect("proof should be valid");
-        
+
         // The proof should have branches
         assert!(!proof.branch.is_empty());
     }
@@ -557,7 +464,7 @@ mod tests {
     #[test]
     fn test_state_with_consolidations_proof() {
         let mut state = MinimalBeaconState::default();
-        
+
         // Add validators
         for i in 0..3u8 {
             let mut validator = Validator::default();
@@ -566,23 +473,23 @@ mod tests {
             state.validators.push(validator);
             state.balances.push(32_000_000_000);
         }
-        
+
         // Add a consolidation
         state.pending_consolidations.push(PendingConsolidation {
             source_index: 1,
             target_index: 0,
         });
-        
+
         // Generate a proof for pending_consolidations[0].source_index
         let path: &[PathElement] = &[
             "pending_consolidations".into(),
             0usize.into(),
             "source_index".into(),
         ];
-        
+
         let (proof, witness) = state.prove(path).expect("should prove");
         proof.verify(witness).expect("proof should be valid");
-        
+
         assert!(!proof.branch.is_empty());
     }
 }

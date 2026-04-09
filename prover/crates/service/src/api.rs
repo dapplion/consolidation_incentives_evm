@@ -128,7 +128,10 @@ async fn metrics(State(state): State<AppState>) -> String {
         "proof_generation_duration_seconds",
         "Time to generate proofs"
     );
-    describe_histogram!("tx_submission_duration_seconds", "Time to submit transaction");
+    describe_histogram!(
+        "tx_submission_duration_seconds",
+        "Time to submit transaction"
+    );
 
     // Update gauge values from state
     metrics::gauge!("sync_current_slot").set(state.current_slot() as f64);

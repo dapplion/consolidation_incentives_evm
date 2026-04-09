@@ -57,7 +57,10 @@ pub fn prove_against_leaf_chunks(
 ) -> (Vec<[u8; 32]>, [u8; 32]) {
     let zh = zero_hashes();
     let leaf_count = 1usize << depth;
-    assert!(index < leaf_count, "index {index} out of range for depth {depth}");
+    assert!(
+        index < leaf_count,
+        "index {index} out of range for depth {depth}"
+    );
 
     // Build the tree layer by layer from bottom up.
     // We only need to keep track of the current layer and compute parents.
@@ -213,13 +216,15 @@ pub fn prove_container_field(
     prove_against_leaf_chunks(field_hashes, field_index, depth)
 }
 
+pub type SmallContainerProof = (Vec<[u8; 32]>, [u8; 32], [u8; 32]);
+
 /// Generate a proof for a field within a fixed-size SSZ container (like Validator).
 ///
 /// Uses ssz_rs's `prove` for small types where it's efficient.
 pub fn prove_small_container_field<T: SimpleSerialize>(
     container: &T,
     path: &[PathElement],
-) -> Result<(Vec<[u8; 32]>, [u8; 32], [u8; 32]), MerkleizationError> {
+) -> Result<SmallContainerProof, MerkleizationError> {
     let (proof, witness) = container.prove(path)?;
     let branch: Vec<[u8; 32]> = proof.branch.into_iter().map(|n| n.into()).collect();
     let leaf: [u8; 32] = proof.leaf.into();
@@ -286,7 +291,7 @@ mod tests {
         let (proof, root) = prove_against_leaf_chunks(&leaves, 0, 2);
         assert_eq!(proof.len(), 2);
         assert_eq!(proof[0], [2u8; 32]); // sibling at depth 0
-        // sibling at depth 1 is hash(leaf[2], leaf[3]=zero)
+                                         // sibling at depth 1 is hash(leaf[2], leaf[3]=zero)
         let right_subtree = hash_pair(&[3u8; 32], &zh[0]);
         assert_eq!(proof[1], right_subtree);
 
@@ -364,7 +369,7 @@ mod tests {
 
         // Verify
         let mut current = [2u8; 32]; // field 1
-        // index 1 -> bit 0 is 1 (right child), bit 1 is 0 (left child)
+                                     // index 1 -> bit 0 is 1 (right child), bit 1 is 0 (left child)
         current = hash_pair(&proof[0], &current); // hash(field[0], field[1])
         current = hash_pair(&current, &proof[1]); // hash(left_pair, right_pair)
         assert_eq!(current, root);

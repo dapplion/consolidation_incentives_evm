@@ -172,17 +172,18 @@ mod tests {
         };
 
         let encoded = ssz_rs::serialize(&consolidation).expect("serialize");
-        let decoded: PendingConsolidation =
-            ssz_rs::deserialize(&encoded).expect("deserialize");
+        let decoded: PendingConsolidation = ssz_rs::deserialize(&encoded).expect("deserialize");
 
         assert_eq!(consolidation, decoded);
     }
 
     #[test]
     fn test_validator_ssz_roundtrip() {
-        let mut validator = Validator::default();
-        validator.effective_balance = 32_000_000_000;
-        validator.activation_epoch = 100;
+        let mut validator = Validator {
+            effective_balance: 32_000_000_000,
+            activation_epoch: 100,
+            ..Validator::default()
+        };
         validator.withdrawal_credentials[0] = 0x01;
 
         let encoded = ssz_rs::serialize(&validator).expect("serialize");

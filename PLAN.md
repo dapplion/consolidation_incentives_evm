@@ -1044,3 +1044,13 @@ This is the final validation before mainnet deployment.
 - **Step 19**: Deferred until Step 18 complete
 - MVP complete and production-ready
 - Next action: Chiado testnet deployment (requires beacon debug API + funded account)
+
+**2026-04-10 (hourly check):** Rust warning/clippy cleanup completed
+- Cleaned up dormant Rust warnings across `proof-gen`, `service`, `integration-tests`, `test-vectors`, `real-chain-test`, and `service/examples`
+- Replaced several manual `Default` impls with derives where equivalent
+- Tightened tests to exercise status counting / epoch-error tracking paths instead of leaving dead code warnings behind
+- Fixed small clippy nits (`ptr_arg`, `type_complexity`, `field_reassign_with_default`, `manual_div_ceil`, needless borrows, unnecessary casts)
+- Added narrowly-scoped allow for the generated alloy `sol!` binding's `claimReward(...)` signature, since the contract ABI naturally exceeds clippy's argument-count preference
+- **Verification:** `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (85 Rust tests passing: 17 service + 12 integration + 56 proof-gen)
+- Solidity tests still blocked locally because `forge` is not installed on PATH in this environment
+- No change to project scope: Step 18 remains blocked on beacon debug API access; Step 19 remains deferred until that is available

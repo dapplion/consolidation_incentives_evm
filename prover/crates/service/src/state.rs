@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 /// Status of a consolidation claim
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimStatus {
     /// Detected in beacon state
@@ -140,7 +141,10 @@ impl AppState {
     /// Get consolidation by source index
     #[must_use]
     pub fn get_consolidation(&self, source_index: u64) -> Option<ConsolidationRecord> {
-        self.inner.consolidations.get(&source_index).map(|r| r.clone())
+        self.inner
+            .consolidations
+            .get(&source_index)
+            .map(|r| r.clone())
     }
 
     /// Get all consolidations
@@ -229,22 +233,78 @@ mod tests {
     fn test_consolidation_tracking() {
         let state = AppState::new();
 
-        let record = ConsolidationRecord {
-            source_index: 42,
-            target_index: 100,
-            epoch_seen: 500,
-            status: ClaimStatus::Detected,
-            tx_hash: None,
-            error: None,
-        };
+        let records = [
+            ConsolidationRecord {
+                source_index: 42,
+                target_index: 100,
+                epoch_seen: 500,
+                status: ClaimStatus::Detected,
+                tx_hash: None,
+                error: None,
+            },
+            ConsolidationRecord {
+                source_index: 43,
+                target_index: 101,
+                epoch_seen: 500,
+                status: ClaimStatus::ProofBuilt,
+                tx_hash: None,
+                error: None,
+            },
+            ConsolidationRecord {
+                source_index: 44,
+                target_index: 102,
+                epoch_seen: 500,
+                status: ClaimStatus::Submitted,
+                tx_hash: Some("0x1234".to_string()),
+                error: None,
+            },
+            ConsolidationRecord {
+                source_index: 45,
+                target_index: 103,
+                epoch_seen: 500,
+                status: ClaimStatus::Confirmed,
+                tx_hash: Some("0x5678".to_string()),
+                error: None,
+            },
+            ConsolidationRecord {
+                source_index: 46,
+                target_index: 104,
+                epoch_seen: 500,
+                status: ClaimStatus::Failed,
+                tx_hash: None,
+                error: Some("boom".to_string()),
+            },
+        ];
 
-        state.upsert_consolidation(record.clone());
+        for record in records {
+            state.upsert_consolidation(record);
+        }
 
         let retrieved = state.get_consolidation(42).unwrap();
         assert_eq!(retrieved.source_index, 42);
         assert_eq!(retrieved.status, ClaimStatus::Detected);
+        assert_eq!(state.all_consolidations().len(), 5);
 
         let counts = state.status_counts();
         assert_eq!(counts.detected, 1);
+        assert_eq!(counts.proof_built, 1);
+        assert_eq!(counts.submitted, 1);
+        assert_eq!(counts.confirmed, 1);
+        assert_eq!(counts.failed, 1);
+    }
+
+    #[test]
+    fn test_epoch_and_error_tracking() {
+        let state = AppState::new();
+        state.set_current_epoch(123);
+        assert_eq!(state.current_epoch(), 123);
+
+        state.set_error(Some("rpc timeout".to_string()));
+        assert_eq!(state.last_error().as_deref(), Some("rpc timeout"));
+
+        state.set_error(None);
+        assert_eq!(state.last_error(), None);
+
+        assert!(state.uptime_secs() <= 1);
     }
 }

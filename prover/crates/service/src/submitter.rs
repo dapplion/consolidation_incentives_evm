@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 //! Transaction Submitter
 //!
 //! Submits consolidation reward claims to the smart contract.
@@ -35,6 +37,7 @@ sol! {
 }
 
 /// Submitter configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SubmitterConfig {
     /// Gnosis RPC URL
@@ -50,12 +53,14 @@ pub struct SubmitterConfig {
 }
 
 /// Transaction submitter
+#[allow(dead_code)]
 pub struct Submitter {
     config: SubmitterConfig,
     contract_address: Address,
     signer: Option<PrivateKeySigner>,
 }
 
+#[allow(dead_code)]
 impl Submitter {
     /// Create a new submitter (read-only, no signer)
     pub fn new(config: SubmitterConfig) -> Result<Self> {
@@ -121,13 +126,12 @@ impl Submitter {
         // Build provider with wallet
         let wallet = EthereumWallet::from(signer.clone());
         let url: reqwest::Url = self.config.rpc_url.parse()?;
-        let provider = ProviderBuilder::new()
-            .wallet(wallet)
-            .connect_http(url);
+        let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
 
         // Check current gas price
         let gas_price = provider.get_gas_price().await?;
-        let max_gas_price_wei = U256::from(self.config.max_gas_price_gwei) * U256::from(1_000_000_000);
+        let max_gas_price_wei =
+            U256::from(self.config.max_gas_price_gwei) * U256::from(1_000_000_000);
         if U256::from(gas_price) > max_gas_price_wei {
             anyhow::bail!(
                 "Gas price {} gwei exceeds maximum {} gwei",

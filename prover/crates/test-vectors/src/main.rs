@@ -12,9 +12,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use proof_gen::beacon_state::{
-    BeaconBlockHeader, PendingConsolidation, Validator,
-};
+use proof_gen::beacon_state::{BeaconBlockHeader, PendingConsolidation, Validator};
 use proof_gen::sparse_proof::mix_in_length;
 use proof_gen::state_prover::{compute_list_root, StateProver};
 use proof_gen::ConsolidationProofBundle;
@@ -142,15 +140,15 @@ fn compute_gnosis_field_roots(
     field_roots[4] = hash_header_default();
     // Field 5: block_roots (Vector of zeros)
     field_roots[5] = hash_zero_vector(8192); // SLOTS_PER_HISTORICAL_ROOT on gnosis
-    // Field 6: state_roots
+                                             // Field 6: state_roots
     field_roots[6] = hash_zero_vector(8192);
     // Field 7: historical_roots (empty list, depth depends on limit but root is mix_in_length of zero hash)
     field_roots[7] = empty_list_root(24); // HISTORICAL_ROOTS_LIMIT = 2^24
-    // Field 8: eth1_data
+                                          // Field 8: eth1_data
     field_roots[8] = hash_eth1_data_default();
     // Field 9: eth1_data_votes (empty list)
     field_roots[9] = empty_list_root(10); // ETH1_DATA_VOTES_BOUND depth ~10 (2^10 = 1024)
-    // Field 10: eth1_deposit_index
+                                          // Field 10: eth1_deposit_index
     field_roots[10] = hash_u64(0);
 
     // Field 11: validators - use gnosis depth 40
@@ -158,8 +156,7 @@ fn compute_gnosis_field_roots(
         .iter()
         .map(|v| v.hash_tree_root().unwrap().into())
         .collect();
-    field_roots[11] =
-        compute_list_root(&validator_hashes, VALIDATORS_TREE_DEPTH, validators.len());
+    field_roots[11] = compute_list_root(&validator_hashes, VALIDATORS_TREE_DEPTH, validators.len());
 
     // Field 12: balances (list of u64s)
     let balance_leaves = pack_u64_list(&vec![32_000_000_000u64; validators.len()]);
@@ -168,11 +165,11 @@ fn compute_gnosis_field_roots(
 
     // Field 13: randao_mixes (Vector of zeros)
     field_roots[13] = hash_zero_vector(8192); // EPOCHS_PER_HISTORICAL_VECTOR on gnosis
-    // Field 14: slashings
+                                              // Field 14: slashings
     field_roots[14] = hash_zero_u64_vector(8192); // EPOCHS_PER_SLASHINGS_VECTOR
-    // Field 15: previous_epoch_participation (empty list)
+                                                  // Field 15: previous_epoch_participation (empty list)
     field_roots[15] = empty_list_root(40); // same limit as validators
-    // Field 16: current_epoch_participation (empty list)
+                                           // Field 16: current_epoch_participation (empty list)
     field_roots[16] = empty_list_root(40);
     // Field 17: justification_bits (Bitvector<4>)
     field_roots[17] = hash_justification_bits_default();
@@ -210,7 +207,7 @@ fn compute_gnosis_field_roots(
     field_roots[33] = hash_u64(0);
     // Field 34: pending_deposits (empty list)
     field_roots[34] = empty_list_root(27); // PENDING_DEPOSITS_LIMIT = 2^27
-    // Field 35: pending_partial_withdrawals (empty list)
+                                           // Field 35: pending_partial_withdrawals (empty list)
     field_roots[35] = empty_list_root(27); // PENDING_PARTIAL_WITHDRAWALS_LIMIT = 2^27
 
     // Field 36: pending_consolidations - use gnosis depth 18
@@ -298,9 +295,9 @@ fn hash_header_default() -> [u8; 32] {
 fn hash_eth1_data_default() -> [u8; 32] {
     // 3 fields → depth 2 (4 leaves)
     let fields = [
-        [0u8; 32], // deposit_root
+        [0u8; 32],   // deposit_root
         hash_u64(0), // deposit_count
-        [0u8; 32], // block_hash
+        [0u8; 32],   // block_hash
     ];
     hash_container_fields(&fields, 2)
 }
@@ -328,7 +325,7 @@ fn hash_sync_committee_default() -> [u8; 32] {
     // This is complex — just use a deterministic placeholder since it doesn't
     // affect the proofs we care about (validators and consolidations)
     let zero_pubkey_root = zero_hash(1); // Vector<u8, 48> root: hash of 2 chunks (48 bytes = 2 x 32-byte chunks)
-    // 512 identical zero pubkey roots → depth 9 binary tree
+                                         // 512 identical zero pubkey roots → depth 9 binary tree
     let pubkeys_root = {
         let mut h = zero_pubkey_root;
         for _ in 0..9 {
@@ -358,7 +355,7 @@ fn hash_zero_vector(len: usize) -> [u8; 32] {
 /// Hash of a zero-valued u64 Vector (packed)
 fn hash_zero_u64_vector(len: usize) -> [u8; 32] {
     // u64s pack 4 per chunk. Vector<u64, N> has N/4 chunks.
-    let num_chunks = (len + 3) / 4;
+    let num_chunks = len.div_ceil(4);
     let depth = (num_chunks as f64).log2().ceil() as u32;
     zero_hash(depth)
 }
@@ -423,16 +420,16 @@ fn main() -> Result<()> {
 
     // Create 10 validators with various properties
     let validators = vec![
-        make_validator(0, 100, 0x01), // eligible, 0x01 credentials
-        make_validator(1, 200, 0x01), // eligible
-        make_validator(2, 500, 0x01), // eligible
-        make_validator(3, 999, 0x01), // eligible (just under max_epoch)
+        make_validator(0, 100, 0x01),  // eligible, 0x01 credentials
+        make_validator(1, 200, 0x01),  // eligible
+        make_validator(2, 500, 0x01),  // eligible
+        make_validator(3, 999, 0x01),  // eligible (just under max_epoch)
         make_validator(4, 1000, 0x01), // NOT eligible (activation_epoch == max_epoch)
         make_validator(5, 2000, 0x01), // NOT eligible (too high)
-        make_validator(6, 300, 0x02), // eligible, 0x02 credentials
-        make_validator(7, 50, 0x00),  // BLS credentials (invalid for reward)
-        make_validator(8, 150, 0x01), // eligible
-        make_validator(9, 400, 0x01), // eligible
+        make_validator(6, 300, 0x02),  // eligible, 0x02 credentials
+        make_validator(7, 50, 0x00),   // BLS credentials (invalid for reward)
+        make_validator(8, 150, 0x01),  // eligible
+        make_validator(9, 400, 0x01),  // eligible
     ];
 
     // Create consolidations
@@ -500,13 +497,23 @@ fn main() -> Result<()> {
 
     // Claim 0: validator 0, consolidation 0 (0x01 credentials, eligible)
     let bundle0 = prover.generate_full_proof_bundle(&header, 0, beacon_timestamp)?;
-    assert_eq!(bundle0.proof_consolidation.len(), EXPECTED_CONSOLIDATION_PROOF_LEN,
+    assert_eq!(
+        bundle0.proof_consolidation.len(),
+        EXPECTED_CONSOLIDATION_PROOF_LEN,
         "consolidation proof length mismatch: got {}, expected {}",
-        bundle0.proof_consolidation.len(), EXPECTED_CONSOLIDATION_PROOF_LEN);
-    assert_eq!(bundle0.proof_credentials.len(), EXPECTED_VALIDATOR_PROOF_LEN,
-        "credentials proof length mismatch");
-    assert_eq!(bundle0.proof_activation_epoch.len(), EXPECTED_VALIDATOR_PROOF_LEN,
-        "activation epoch proof length mismatch");
+        bundle0.proof_consolidation.len(),
+        EXPECTED_CONSOLIDATION_PROOF_LEN
+    );
+    assert_eq!(
+        bundle0.proof_credentials.len(),
+        EXPECTED_VALIDATOR_PROOF_LEN,
+        "credentials proof length mismatch"
+    );
+    assert_eq!(
+        bundle0.proof_activation_epoch.len(),
+        EXPECTED_VALIDATOR_PROOF_LEN,
+        "activation epoch proof length mismatch"
+    );
     claims.push(bundle_to_claim(&bundle0));
 
     // Claim 1: validator 2, consolidation 1 (0x01 credentials, eligible)

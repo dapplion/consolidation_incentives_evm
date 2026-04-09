@@ -6,7 +6,7 @@
 //! 2. Proof of `validators[source].withdrawal_credentials`
 //! 3. Proof of `validators[source].activation_epoch`
 
-use crate::beacon_state::{MinimalBeaconState, BeaconBlockHeader};
+use crate::beacon_state::{BeaconBlockHeader, MinimalBeaconState};
 use crate::gindex::GindexCalculator;
 use serde::{Deserialize, Serialize};
 use ssz_rs::prelude::*;
@@ -114,7 +114,7 @@ impl ProofGenerator {
             GindexCalculator::validator_proof_length(),
         )
     }
-    
+
     /// Get the expected proof lengths for the test state (MinimalBeaconState).
     pub fn test_proof_lengths() -> (u32, u32) {
         (
@@ -234,49 +234,61 @@ impl ProofGenerator {
     }
 
     /// Verify that a proof bundle is valid against a block root using test state gindices.
-    /// 
+    ///
     /// This uses the test state tree depths (smaller than production).
     pub fn verify_proof_bundle_test(
         bundle: &ConsolidationProofBundle,
         block_root: [u8; 32],
     ) -> Result<(), ProofError> {
         let block_root_node = bytes_to_node(block_root);
-        
+
         // Verify consolidation proof using test gindex
-        let consolidation_gindex = GindexCalculator::test_consolidation_source_gindex(bundle.consolidation_index);
+        let consolidation_gindex =
+            GindexCalculator::test_consolidation_source_gindex(bundle.consolidation_index);
         let consolidation_leaf = bytes_to_node(ssz_u64_to_bytes32(bundle.source_index));
         let consolidation_branch = bytes_to_nodes(&bundle.proof_consolidation);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             consolidation_leaf,
             &consolidation_branch,
             consolidation_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Consolidation proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Consolidation proof invalid: {e}"))
+        })?;
 
         // Verify credentials proof using test gindex
-        let credentials_gindex = GindexCalculator::test_validator_credentials_gindex(bundle.source_index);
+        let credentials_gindex =
+            GindexCalculator::test_validator_credentials_gindex(bundle.source_index);
         let credentials_leaf = bytes_to_node(bundle.source_credentials);
         let credentials_branch = bytes_to_nodes(&bundle.proof_credentials);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             credentials_leaf,
             &credentials_branch,
             credentials_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Credentials proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Credentials proof invalid: {e}"))
+        })?;
 
         // Verify activation epoch proof using test gindex
-        let activation_gindex = GindexCalculator::test_validator_activation_epoch_gindex(bundle.source_index);
+        let activation_gindex =
+            GindexCalculator::test_validator_activation_epoch_gindex(bundle.source_index);
         let activation_leaf = bytes_to_node(ssz_u64_to_bytes32(bundle.activation_epoch));
         let activation_branch = bytes_to_nodes(&bundle.proof_activation_epoch);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             activation_leaf,
             &activation_branch,
             activation_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Activation epoch proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Activation epoch proof invalid: {e}"))
+        })?;
 
         Ok(())
     }
@@ -287,42 +299,54 @@ impl ProofGenerator {
         block_root: [u8; 32],
     ) -> Result<(), ProofError> {
         let block_root_node = bytes_to_node(block_root);
-        
+
         // Verify consolidation proof
-        let consolidation_gindex = GindexCalculator::consolidation_source_gindex(bundle.consolidation_index);
+        let consolidation_gindex =
+            GindexCalculator::consolidation_source_gindex(bundle.consolidation_index);
         let consolidation_leaf = bytes_to_node(ssz_u64_to_bytes32(bundle.source_index));
         let consolidation_branch = bytes_to_nodes(&bundle.proof_consolidation);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             consolidation_leaf,
             &consolidation_branch,
             consolidation_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Consolidation proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Consolidation proof invalid: {e}"))
+        })?;
 
         // Verify credentials proof
-        let credentials_gindex = GindexCalculator::validator_credentials_gindex(bundle.source_index);
+        let credentials_gindex =
+            GindexCalculator::validator_credentials_gindex(bundle.source_index);
         let credentials_leaf = bytes_to_node(bundle.source_credentials);
         let credentials_branch = bytes_to_nodes(&bundle.proof_credentials);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             credentials_leaf,
             &credentials_branch,
             credentials_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Credentials proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Credentials proof invalid: {e}"))
+        })?;
 
         // Verify activation epoch proof
-        let activation_gindex = GindexCalculator::validator_activation_epoch_gindex(bundle.source_index);
+        let activation_gindex =
+            GindexCalculator::validator_activation_epoch_gindex(bundle.source_index);
         let activation_leaf = bytes_to_node(ssz_u64_to_bytes32(bundle.activation_epoch));
         let activation_branch = bytes_to_nodes(&bundle.proof_activation_epoch);
-        
+
         ssz_rs::proofs::is_valid_merkle_branch_for_generalized_index(
             activation_leaf,
             &activation_branch,
             activation_gindex as usize,
             block_root_node,
-        ).map_err(|e| ProofError::ProofGenerationFailed(format!("Activation epoch proof invalid: {e}")))?;
+        )
+        .map_err(|e| {
+            ProofError::ProofGenerationFailed(format!("Activation epoch proof invalid: {e}"))
+        })?;
 
         Ok(())
     }
@@ -355,11 +379,14 @@ fn ssz_u64_to_bytes32(value: u64) -> [u8; 32] {
 mod proof_vec_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(data: &Vec<[u8; 32]>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(data: &[[u8; 32]], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let hex_strings: Vec<String> = data.iter().map(|h| format!("0x{}", hex::encode(h))).collect();
+        let hex_strings: Vec<String> = data
+            .iter()
+            .map(|h| format!("0x{}", hex::encode(h)))
+            .collect();
         hex_strings.serialize(serializer)
     }
 
@@ -387,7 +414,7 @@ mod proof_vec_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::beacon_state::{Validator, PendingConsolidation};
+    use crate::beacon_state::{PendingConsolidation, Validator};
 
     #[test]
     fn test_proof_bundle_recipient_0x01() {
@@ -455,7 +482,7 @@ mod tests {
         assert_eq!(bytes[0], 42);
         assert_eq!(bytes[1..8], [0u8; 7]);
         assert_eq!(bytes[8..32], [0u8; 24]);
-        
+
         let bytes_max = ssz_u64_to_bytes32(u64::MAX);
         assert_eq!(&bytes_max[..8], &u64::MAX.to_le_bytes());
     }
@@ -467,7 +494,7 @@ mod tests {
         assert_eq!(consolidation_len, 29);
         assert_eq!(validator_len, 53);
     }
-    
+
     #[test]
     fn test_expected_proof_lengths_test_state() {
         let (consolidation_len, validator_len) = ProofGenerator::test_proof_lengths();
@@ -482,7 +509,7 @@ mod tests {
     fn test_generate_proofs_from_state() {
         // Create a state with test data
         let mut state = MinimalBeaconState::default();
-        
+
         // Add some validators
         for i in 0..5u8 {
             let mut validator = Validator::default();
@@ -493,27 +520,31 @@ mod tests {
             state.validators.push(validator);
             state.balances.push(32_000_000_000);
         }
-        
+
         // Add some consolidations
         state.pending_consolidations.push(PendingConsolidation {
             source_index: 2,
             target_index: 0,
         });
-        
+
         // Generate proofs for consolidation 0
         let result = ProofGenerator::generate_proofs_from_state(&state, 0);
-        assert!(result.is_ok(), "Failed to generate proofs: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Failed to generate proofs: {:?}",
+            result.err()
+        );
+
         let proofs = result.unwrap();
         assert_eq!(proofs.source_index, 2);
         assert_eq!(proofs.activation_epoch, 102);
         assert_eq!(proofs.source_credentials[0], 0x01);
-        
+
         // Proofs should have some content
         assert!(!proofs.proof_consolidation.is_empty());
         assert!(!proofs.proof_credentials.is_empty());
         assert!(!proofs.proof_activation_epoch.is_empty());
-        
+
         // Verify the state root is correct
         let computed_state_root: [u8; 32] = state.hash_tree_root().expect("hash state").into();
         assert_eq!(proofs.state_root, computed_state_root);
@@ -522,18 +553,23 @@ mod tests {
     #[test]
     fn test_generate_proofs_out_of_bounds() {
         let state = MinimalBeaconState::default();
-        
+
         // Should fail - no consolidations
         let result = ProofGenerator::generate_proofs_from_state(&state, 0);
-        assert!(matches!(result, Err(ProofError::ConsolidationIndexOutOfBounds(0, 0))));
+        assert!(matches!(
+            result,
+            Err(ProofError::ConsolidationIndexOutOfBounds(0, 0))
+        ));
     }
 
     #[test]
     fn test_full_proof_bundle_generation() {
         // Create a state with test data
-        let mut state = MinimalBeaconState::default();
-        state.slot = 1000;
-        
+        let mut state = MinimalBeaconState {
+            slot: 1000,
+            ..MinimalBeaconState::default()
+        };
+
         // Add validators
         for i in 0..3u8 {
             let mut validator = Validator::default();
@@ -543,13 +579,13 @@ mod tests {
             state.validators.push(validator);
             state.balances.push(32_000_000_000);
         }
-        
+
         // Add a consolidation
         state.pending_consolidations.push(PendingConsolidation {
             source_index: 1,
             target_index: 0,
         });
-        
+
         // Create header with correct state root
         let state_root_bytes: [u8; 32] = state.hash_tree_root().expect("hash state").into();
         let header = BeaconBlockHeader {
@@ -559,60 +595,69 @@ mod tests {
             state_root: state_root_bytes,
             body_root: [1u8; 32],
         };
-        
+
         // Generate full proof bundle
-        let result = ProofGenerator::generate_full_proof_bundle(
-            &header,
-            &state,
-            0,
-            1234567890,
-        );
-        
+        let result = ProofGenerator::generate_full_proof_bundle(&header, &state, 0, 1234567890);
+
         assert!(result.is_ok(), "Failed: {:?}", result.err());
         let bundle = result.unwrap();
-        
+
         assert_eq!(bundle.beacon_timestamp, 1234567890);
         assert_eq!(bundle.source_index, 1);
         assert_eq!(bundle.activation_epoch, 51);
-        
+
         // Full proofs should have content
         assert!(!bundle.proof_consolidation.is_empty());
         assert!(!bundle.proof_credentials.is_empty());
         assert!(!bundle.proof_activation_epoch.is_empty());
-        
+
         // Get expected proof lengths for test state
-        let (expected_consolidation_len, expected_validator_len) = ProofGenerator::test_proof_lengths();
-        
+        let (expected_consolidation_len, expected_validator_len) =
+            ProofGenerator::test_proof_lengths();
+
         // Verify proof lengths match expectations
-        assert_eq!(bundle.proof_consolidation.len(), expected_consolidation_len as usize,
-            "Consolidation proof length mismatch");
-        assert_eq!(bundle.proof_credentials.len(), expected_validator_len as usize,
-            "Credentials proof length mismatch");
-        assert_eq!(bundle.proof_activation_epoch.len(), expected_validator_len as usize,
-            "Activation epoch proof length mismatch");
-        
+        assert_eq!(
+            bundle.proof_consolidation.len(),
+            expected_consolidation_len as usize,
+            "Consolidation proof length mismatch"
+        );
+        assert_eq!(
+            bundle.proof_credentials.len(),
+            expected_validator_len as usize,
+            "Credentials proof length mismatch"
+        );
+        assert_eq!(
+            bundle.proof_activation_epoch.len(),
+            expected_validator_len as usize,
+            "Activation epoch proof length mismatch"
+        );
+
         // Verify the proof bundle is valid
         let block_root: [u8; 32] = header.hash_tree_root().expect("hash header").into();
         let verify_result = ProofGenerator::verify_proof_bundle_test(&bundle, block_root);
-        assert!(verify_result.is_ok(), "Proof verification failed: {:?}", verify_result.err());
+        assert!(
+            verify_result.is_ok(),
+            "Proof verification failed: {:?}",
+            verify_result.err()
+        );
     }
-    
+
     #[test]
     fn test_proof_verification_with_wrong_block_root() {
         // Create a state with test data
         let mut state = MinimalBeaconState::default();
-        
+
         let mut validator = Validator::default();
         validator.withdrawal_credentials[0] = 0x01;
         validator.activation_epoch = 100;
         state.validators.push(validator);
         state.balances.push(32_000_000_000);
-        
+
         state.pending_consolidations.push(PendingConsolidation {
             source_index: 0,
             target_index: 0,
         });
-        
+
         let state_root_bytes: [u8; 32] = state.hash_tree_root().expect("hash state").into();
         let header = BeaconBlockHeader {
             slot: 1000,
@@ -621,14 +666,10 @@ mod tests {
             state_root: state_root_bytes,
             body_root: [1u8; 32],
         };
-        
-        let bundle = ProofGenerator::generate_full_proof_bundle(
-            &header,
-            &state,
-            0,
-            1234567890,
-        ).unwrap();
-        
+
+        let bundle =
+            ProofGenerator::generate_full_proof_bundle(&header, &state, 0, 1234567890).unwrap();
+
         // Try to verify with a wrong block root
         let wrong_root = [0xaa; 32];
         let result = ProofGenerator::verify_proof_bundle_test(&bundle, wrong_root);
