@@ -42,11 +42,11 @@ This is a Cargo workspace with three crates:
 - Individual status counters: `consolidations_by_status{status="detected|proof_built|submitted|confirmed|failed"}`
 
 **Components:**
-- **Scanner:** Polls beacon chain for new consolidations (deferred to production)
-- **Submitter:** Submits claim transactions via alloy (deferred to production)
+- **Scanner:** Polls beacon chain for new consolidations
+- **Submitter:** Submits claim transactions via alloy
 - **API:** Axum REST server with Prometheus metrics
 
-**Status:** API fully functional (11 tests passing), scanner/submitter scaffolded.
+**Status:** API fully functional with dedicated metrics listener support.
 
 #### `test-vectors` — Test Vector Generator
 
@@ -107,17 +107,19 @@ cargo run --bin generate-test-vectors
 # Output: ../contracts/test-vectors/test_vectors.json
 ```
 
-### Run Proof Service (Mock Mode)
+### Run Proof Service
 
 ```bash
-cd crates/service
-cargo run
+cd prover
+cp .env.example .env  # adjust values as needed
+cargo run -p service
 
-# Check health
-curl http://localhost:3000/health
+# Main API
+curl http://localhost:8080/health
+curl http://localhost:8080/status
 
-# View metrics
-curl http://localhost:3000/metrics
+# Dedicated metrics listener
+curl http://localhost:9090/metrics
 ```
 
 ## Configuration
@@ -150,7 +152,9 @@ cargo build --features minimal
 | `RPC_URL` | Gnosis execution RPC | `https://rpc.gnosischain.com` |
 | `CONTRACT_ADDRESS` | Deployed ConsolidationIncentives address | `0x...` |
 | `PRIVATE_KEY` | Submitter private key | `0x...` |
-| `PORT` | API server port | `3000` |
+| `LISTEN` | API listen address | `0.0.0.0:8080` |
+| `METRICS_LISTEN` | Dedicated Prometheus listen address | `0.0.0.0:9090` |
+| `RUST_LOG` | Log filter | `info,service=debug` |
 
 ## Development
 
@@ -287,10 +291,8 @@ After=network.target
 [Service]
 Type=simple
 User=prover
-Environment="BEACON_URL=http://localhost:5052"
-Environment="RPC_URL=https://rpc.gnosischain.com"
-Environment="CONTRACT_ADDRESS=0x..."
-Environment="PRIVATE_KEY=0x..."
+WorkingDirectory=/opt/consolidation-incentives/prover
+EnvironmentFile=/opt/consolidation-incentives/prover/.env
 ExecStart=/usr/local/bin/service
 Restart=on-failure
 
@@ -305,7 +307,7 @@ WantedBy=multi-user.target
 scrape_configs:
   - job_name: 'consolidation-prover'
     static_configs:
-      - targets: ['localhost:3000']
+      - targets: ['localhost:9090']
     metrics_path: '/metrics'
 ```
 

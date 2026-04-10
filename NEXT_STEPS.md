@@ -16,8 +16,8 @@
 | Test vectors | `contracts/test-vectors/` | ✅ Generated |
 | Deployment script | `contracts/script/Deploy.s.sol` | ✅ Complete (6 tests) |
 | Analytics | `dune/queries/` | ✅ Complete (5 queries) |
-| **Scanner** | `prover/crates/service/src/scanner.rs` | 🔸 Stub (needs beacon node) |
-| **Submitter** | `prover/crates/service/src/submitter.rs` | 🔸 Stub (needs contract ABI) |
+| **Scanner** | `prover/crates/service/src/scanner.rs` | 🔸 Detection works; full proof pipeline needs beacon node access |
+| **Submitter** | `prover/crates/service/src/submitter.rs` | ✅ Integrated; needs deployed contract + funded signer for live use |
 | **Real chain testing** | `prover/crates/real-chain-test/` | 🔸 Blocked (no debug API) |
 
 ---
@@ -206,19 +206,16 @@ cargo run --bin real-chain-test -- \
 
 ```bash
 cd prover
+cp .env.example .env
+# edit .env with beacon URL, contract address, signer, and binds
 cargo build --release
 
-./target/release/service \
-  --beacon-url http://localhost:5052 \
-  --contract-address $CONTRACT_ADDRESS \
-  --rpc-url https://rpc.chiado.gnosis.gateway.fm \
-  --private-key $SUBMITTER_PRIVATE_KEY \
-  --bind 0.0.0.0:8080
+./target/release/service
 ```
 
 **Monitor:**
 - Logs: `journalctl -u consolidation-incentives -f`
-- Metrics: `curl http://localhost:8080/metrics`
+- Metrics: `curl http://localhost:9090/metrics`
 - Status: `curl http://localhost:8080/status`
 - Consolidations: `curl http://localhost:8080/consolidations`
 

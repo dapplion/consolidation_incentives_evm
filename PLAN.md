@@ -1054,3 +1054,12 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (85 Rust tests passing: 17 service + 12 integration + 56 proof-gen)
 - Solidity tests still blocked locally because `forge` is not installed on PATH in this environment
 - No change to project scope: Step 18 remains blocked on beacon debug API access; Step 19 remains deferred until that is available
+
+**2026-04-11 (hourly check):** Deployment ergonomics improved for Chiado/mainnet handoff
+- Implemented the previously-unused `--metrics-listen` / `METRICS_LISTEN` service setting by starting a dedicated metrics server alongside the main API server
+- Added coverage for the new metrics router; Rust service test count is now **18**
+- Added starter env files: `prover/.env.example` and `contracts/.env.example`
+- Updated `prover/README.md`, `contracts/DEPLOYMENT.md`, and `NEXT_STEPS.md` to use the new env-driven workflow and the dedicated Prometheus port (`:9090`)
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**86 Rust tests passing**: 18 service + 12 integration + 56 proof-gen)
+- Solidity tests remain unverifiable in this environment because `forge` is still not installed on PATH
+- No scope change: Step 18 still needs beacon debug API access; Step 19 remains deferred until Step 18 can produce real proofs

@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Serialize;
 
-/// Run the API server
+/// Run the main API server
 pub async fn run_server(listen: String, state: AppState) -> anyhow::Result<()> {
     let app = create_router(state);
 
@@ -23,13 +23,32 @@ pub async fn run_server(listen: String, state: AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Create the API router
+/// Run a dedicated metrics server
+pub async fn run_metrics_server(listen: String, state: AppState) -> anyhow::Result<()> {
+    let app = create_metrics_router(state);
+
+    let listener = tokio::net::TcpListener::bind(&listen).await?;
+    tracing::info!(address = %listen, "Metrics server listening");
+
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// Create the main API router
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/status", get(status))
         .route("/consolidations", get(list_consolidations))
         .route("/consolidations/{source_index}", get(get_consolidation))
+        .route("/metrics", get(metrics))
+        .with_state(state)
+}
+
+/// Create a metrics-only router for Prometheus scraping
+pub fn create_metrics_router(state: AppState) -> Router {
+    Router::new()
         .route("/metrics", get(metrics))
         .with_state(state)
 }
@@ -188,6 +207,12 @@ mod tests {
     fn test_create_router() {
         let state = AppState::new();
         let _router = create_router(state);
+    }
+
+    #[test]
+    fn test_create_metrics_router() {
+        let state = AppState::new();
+        let _router = create_metrics_router(state);
     }
 
     // Test the health logic directly

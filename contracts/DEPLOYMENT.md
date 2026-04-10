@@ -20,7 +20,14 @@ Always interact with the **proxy address**. The implementation is swappable via 
 
 ## Configuration
 
-Set these environment variables before deploying:
+Set these environment variables before deploying. A starter file lives at `contracts/.env.example`:
+
+```bash
+cd contracts
+cp .env.example .env
+# edit values, then: source .env
+```
+
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -45,14 +52,10 @@ Test the deployment locally without broadcasting:
 
 ```bash
 cd contracts
-
-export MAX_EPOCH=100000
-export REWARD_AMOUNT=1000000000000000000  # 1 xDAI
-export MIN_CLAIM_DELAY=960
-export INITIAL_FUNDING=10000000000000000000  # 10 xDAI
+source .env
 
 forge script script/Deploy.s.sol \
-  --rpc-url https://rpc.gnosischain.com \
+  --rpc-url ${RPC_URL:-https://rpc.gnosischain.com} \
   --private-key $PRIVATE_KEY
 ```
 
@@ -68,7 +71,7 @@ Add `--broadcast` to actually deploy:
 
 ```bash
 forge script script/Deploy.s.sol \
-  --rpc-url https://rpc.gnosischain.com \
+  --rpc-url ${RPC_URL:-https://rpc.gnosischain.com} \
   --private-key $PRIVATE_KEY \
   --broadcast
 ```
@@ -83,7 +86,7 @@ Add `--verify` to auto-verify on Gnosisscan:
 
 ```bash
 forge script script/Deploy.s.sol \
-  --rpc-url https://rpc.gnosischain.com \
+  --rpc-url ${RPC_URL:-https://rpc.gnosischain.com} \
   --private-key $PRIVATE_KEY \
   --broadcast \
   --verify \

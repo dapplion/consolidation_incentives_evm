@@ -32,11 +32,11 @@ struct Args {
     private_key: Option<String>,
 
     /// API listen address
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, env = "LISTEN", default_value = "0.0.0.0:8080")]
     listen: String,
 
     /// Metrics listen address
-    #[arg(long, default_value = "0.0.0.0:9090")]
+    #[arg(long, env = "METRICS_LISTEN", default_value = "0.0.0.0:9090")]
     metrics_listen: String,
 }
 
@@ -56,12 +56,17 @@ async fn main() -> Result<()> {
     tracing::info!("Starting consolidation incentives service");
     tracing::info!(beacon_url = %args.beacon_url, "Beacon node");
     tracing::info!(listen = %args.listen, "API server");
+    tracing::info!(metrics_listen = %args.metrics_listen, "Metrics server");
 
     // Initialize application state
     let app_state = state::AppState::new();
 
-    // Start API server
+    // Start API + metrics servers
     let api_handle = tokio::spawn(api::run_server(args.listen.clone(), app_state.clone()));
+    let metrics_handle = tokio::spawn(api::run_metrics_server(
+        args.metrics_listen.clone(),
+        app_state.clone(),
+    ));
 
     // Start beacon scanner (detection only; proof+submission require deployed contract)
     let scanner = scanner::Scanner::new(
@@ -86,7 +91,12 @@ async fn main() -> Result<()> {
         }
         result = api_handle => {
             if let Err(e) = result {
-                tracing::error!(error = %e, "API server error");
+                tracing::error!(error = %e, "API server task error");
+            }
+        }
+        result = metrics_handle => {
+            if let Err(e) = result {
+                tracing::error!(error = %e, "Metrics server task error");
             }
         }
         _ = scanner_handle => {
