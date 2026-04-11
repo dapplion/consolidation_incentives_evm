@@ -184,6 +184,18 @@ cargo test --package service -- scanner
 
 ### 1.5 Real Chain Testing
 
+Before a live dry run, you can prebuild the exact oracle + claim transactions from the generated vectors:
+
+```bash
+cd prover
+cargo run -p consolidation-service --bin devnet-plan -- \
+  --vectors ../contracts/test-vectors/test_vectors.json \
+  --claim-index 0 \
+  --contract $CONTRACT_ADDRESS
+```
+
+That prints ready-to-run `cast send` commands plus raw calldata so a local Anvil/Chiado dry run doesn't require hand-assembling the monster `claimReward(...)` arrays like a cave goblin.
+
 With both contract deployed and beacon access:
 
 ```bash

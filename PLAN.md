@@ -505,7 +505,7 @@ The Rust service exposes `/status` and `/consolidations` for operational visibil
 | 16 | ✅ | `Deploy.s.sol` | Deployment script |
 | 17 | ✅ | Dune queries | Analytics SQL (5 queries + README) |
 | 18 | 🔸 | Real chain proof testing | Binary created, blocked on debug API access (see REAL_CHAIN_TESTING.md) |
-| 19 | ⬜ | Local devnet validation | Deferred until Step 18 complete (see REAL_CHAIN_TESTING.md) |
+| 19 | 🔸 | Local devnet validation | Devnet claim planner added (`cargo run -p consolidation-service --bin devnet-plan`); full live validation still deferred until Step 18 can produce real proofs and a local/forked devnet is available |
 
 ### Progress Notes
 
@@ -1063,3 +1063,13 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**86 Rust tests passing**: 18 service + 12 integration + 56 proof-gen)
 - Solidity tests remain unverifiable in this environment because `forge` is still not installed on PATH
 - No scope change: Step 18 still needs beacon debug API access; Step 19 remains deferred until Step 18 can produce real proofs
+
+**2026-04-12 (hourly check):** Step 19 prep improved — local devnet claim planner
+- Added `prover/crates/service/src/bin/devnet-plan.rs`
+- New binary turns generated JSON test vectors into ready-to-run local devnet commands + raw calldata:
+  - `cast send <oracle> 'setRoot(uint256,bytes32)' ...`
+  - `cast send <contract> 'claimReward(...)' ...`
+- Supports text + JSON output, explicit claim selection, and custom oracle/contract addresses for Anvil / Chiado dry runs
+- Added 3 unit tests covering ABI encoding, rendering, and claim-index validation
+- **Verification:** `cargo test -p consolidation-service --bin devnet-plan` ✅
+- Step 19 is now partially prepared, but full live validation still depends on Step 18 producing real proofs and on Foundry/Anvil availability in the runtime
