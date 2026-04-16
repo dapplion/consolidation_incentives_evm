@@ -1095,3 +1095,15 @@ This is the final validation before mainnet deployment.
 - **Step 19**: Devnet claim planner ready, full validation deferred until Step 18 complete
 - MVP complete and production-ready
 - Next action: Chiado testnet deployment (requires beacon debug API + funded account + deployed contract)
+
+**2026-04-17 (hourly check):** Step 18 infrastructure blocker reduced — internal debug SSZ access confirmed
+- Picked up existing in-progress work in `prover/crates/real-chain-test/` and finished verifying the richer `fetch-and-prove` snapshot flow
+- `fetch-and-prove` now accepts CLI args/env config, resolves `finalized`/`head`/slot inputs, records pending consolidation counts, inspects validator metadata, and writes richer JSON snapshots
+- **Public endpoint check:** `https://rpc.gnosischain.com/beacon` still exposes standard endpoints but not usable debug-state SSZ for this workflow
+- **Internal node check:** SSH tunnel to `gnosis-bn-validators` (`65.108.206.150:4000`) successfully fetched finalized debug SSZ
+- Verified finalized slot `27478048`, block root `0x2ceb1b9a961fe2f7916c8ddd5093f1dd84b005f1079af10cb81060f55909d916`, and debug SSZ size `80,503,375` bytes via tunnel
+- **Current chain state:** finalized state still has `0` pending consolidations, so there is no real consolidation proof bundle to generate yet
+- **Reframed Step 18 blocker:** no longer beacon debug API access; now waiting on a historical/future state with non-empty `pending_consolidations`
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` with the new tunnel/debug findings
+- **Verification:** `cargo test` ✅ (**89 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen)
+- Solidity tests remain unavailable in this environment because `forge` is not installed on PATH

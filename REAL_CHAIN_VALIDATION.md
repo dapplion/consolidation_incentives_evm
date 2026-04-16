@@ -9,14 +9,19 @@
 
 Successfully validated all scanner components against live Gnosis beacon chain data. The proof service's Beacon API client works correctly with real production infrastructure.
 
+**2026-04-17 update:** validated that the internal Lighthouse node also exposes the debug SSZ endpoint over SSH tunnel, and the upgraded `fetch-and-prove` binary can now export a richer real-chain snapshot. The finalized state tested on 2026-04-17 had zero pending consolidations, so proof generation remains waiting on a state that actually contains one.
+
 ## Test Results
 
 ### Connection Details
 
-- **Beacon Node:** Lighthouse/v8.0.1-ced49dd/x86_64-linux
-- **Access Method:** SSH tunnel (localhost:15052 → remote:4000)
-- **Finalized Epoch:** 1689148
-- **Head Slot:** 27026406
+- **Beacon Node:** Lighthouse/v8.0.1-ced49dd/x86_64-linux (2026-03-21 validation)
+- **Beacon Node (2026-04-17):** Lighthouse/v8.1.3-176cce5/x86_64-linux
+- **Access Method:** SSH tunnel (localhost:15052 → remote:4000) / later localhost:14000 → remote:4000
+- **Finalized Epoch (2026-03-21):** 1689148
+- **Finalized Epoch (2026-04-17):** 1717378
+- **Head Slot (2026-03-21):** 27026406
+- **Finalized Slot (2026-04-17):** 27478048
 
 ### API Endpoint Validation
 
@@ -28,6 +33,7 @@ All Beacon API endpoints required by the scanner tested successfully:
 | `/eth/v1/beacon/states/head/finality_checkpoints` | Get finalized epoch | ✅ Working |
 | `/eth/v1/beacon/states/{slot}/pending_consolidations` | Fetch consolidations | ✅ Working |
 | `/eth/v1/beacon/blocks/{slot}/header` | Block header metadata | ✅ Working |
+| `/eth/v2/debug/beacon/states/{slot}` | Full state SSZ download | ✅ Working via internal SSH tunnel |
 
 ### Scanner Functionality
 
@@ -47,16 +53,18 @@ BEACON_API_URL=http://localhost:15052 cargo run --example test_scanner
 
 ### Current Chain State
 
-- **Pending Consolidations:** 0 (none found at finalized slot 27026368)
+- **Pending Consolidations:** 0 (none found at finalized slot 27026368 on 2026-03-21, and still 0 at finalized slot 27478048 on 2026-04-17)
 - **Electra Upgrade:** Active (pending_consolidations endpoint available)
 - **Finalization:** Healthy (consistent checkpoints)
+- **Debug SSZ availability:** Confirmed on the internal node; finalized state download size was 80,503,375 bytes on 2026-04-17
 
 ## Implications
 
 1. **Scanner is production-ready** — All detection logic validated against real chain
-2. **No code changes needed** — Existing implementation handles real data correctly
+2. **Debug-state access is production-ready** — internal beacon node can serve full finalized SSZ over SSH tunnel
 3. **EIP-7251 is active** — Electra endpoints available on Gnosis
 4. **No consolidations yet** — Program will have no claims initially (expected)
+5. **Remaining blocker is data availability, not infrastructure** — we now need a state with at least one pending consolidation to generate a real proof bundle
 
 ## Access Setup for Production
 

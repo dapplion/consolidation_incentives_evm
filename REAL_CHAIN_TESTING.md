@@ -2,25 +2,37 @@
 
 ## Step 18: Real Gnosis Chain Proof Generation
 
-### Progress (2026-02-13)
+### Progress (2026-02-13 → 2026-04-17)
 
 **✅ Confirmed Working:**
 - Connection to Gnosis public beacon endpoint: `https://rpc.gnosischain.com/beacon`
-- Finality checkpoint fetching: Successfully retrieved finalized epoch 1649408 (slot 26390528)
-- Block header fetching: Successfully retrieved block root `0xb89b8ca8421653748ad924db77eb4b2b17eeae2715d9534d1776e1147a4e9bff`
-- State root: `0x9d4f2c85de51ed1d954b76acf7ad5c36c885ec69d244941638c793e3019ff076`
+- Finality checkpoint fetching works against both public and internal nodes
+- Block header fetching works against both public and internal nodes
+- SSH access to internal beacon host `gnosis-bn-validators` (`65.108.206.150`) works
+- Internal Lighthouse beacon API is available on `127.0.0.1:4000`
+- Full beacon state SSZ fetching works via SSH tunnel to the internal node:
+  ```bash
+  ssh -o BatchMode=yes -N -L 14000:127.0.0.1:4000 root@65.108.206.150
+  GNOSIS_BEACON_URL=http://127.0.0.1:14000 cargo run -p real-chain-test -- --state-id finalized
+  ```
+- Verified finalized-state debug SSZ download at slot `27478048` (`80,503,375` bytes)
+- `fetch-and-prove` now produces a richer JSON snapshot with:
+  - resolved state/slot metadata
+  - pending consolidation count
+  - validator activation epoch + withdrawal credential summaries
+  - debug endpoint availability notes
 
-**🔸 Blocked:**
-- Full beacon state SSZ fetching requires `/eth/v2/debug/beacon/states/{slot}` endpoint
-- Public Gnosis endpoints don't expose debug endpoints (resource-intensive)
-- Need access to a full Gnosis beacon node with debug API enabled
+**🔸 Still Blocked / Deferred:**
+- The currently finalized real-chain state has **0 pending consolidations**, so there is nothing real to prove yet
+- Step 18's original “generate proofs for actual consolidations” sub-goal still requires a historical or future state with non-empty `pending_consolidations`
+- Step 19 still depends on obtaining at least one real consolidation proof bundle
 
 **Options to Unblock:**
 
 1. **Access internal beacon node via SSH tunnel:**
    ```bash
-   ssh -L 5052:localhost:5052 root@65.108.206.150
-   GNOSIS_BEACON_URL=http://localhost:5052 cargo run --bin fetch-and-prove
+   ssh -L 14000:127.0.0.1:4000 root@65.108.206.150
+   GNOSIS_BEACON_URL=http://127.0.0.1:14000 cargo run -p real-chain-test -- --state-id finalized
    ```
 
 2. **Run local Gnosis beacon node:**
@@ -38,11 +50,11 @@
 
 ### Recommendation
 
-**Option 4** is the pragmatic choice for this hourly cron job:
-- Contract is fully tested with synthetic but valid SSZ proofs
+The SSH-tunneled internal node removes the old debug-endpoint blocker, so the remaining blocker is now purely **chain state availability**:
+- Contract is already fully tested with synthetic but valid SSZ proofs
 - Proof generation logic is validated via cross-checks against `ssz_rs` library
-- Real chain testing is most valuable during actual deployment
-- Can revisit when deploying to Gnosis mainnet
+- Real proof generation can proceed as soon as we have a state with at least one pending consolidation
+- Until then, deployment work can continue and Step 19 can stay staged behind that missing real proof bundle
 
 ### Created Artifacts
 
@@ -66,9 +78,10 @@ This step requires:
 
 ## Next Steps for Production
 
-1. Establish SSH tunnel to internal beacon node OR sync local Gnosis node
-2. Run `fetch-and-prove` to generate real consolidation proofs
-3. Deploy contract to local Anvil fork with real beacon roots
-4. Submit claims with real proofs to verify end-to-end flow
-5. Deploy to Chiado testnet for live testing
-6. Deploy to Gnosis mainnet
+1. Keep SSH tunnel workflow for internal beacon node access
+2. Extend `fetch-and-prove` (or a follow-up helper) to locate a historical/future state with non-empty `pending_consolidations`
+3. Generate a real proof bundle once such a state is found
+4. Deploy contract to local Anvil fork with real beacon roots
+5. Submit claims with real proofs to verify end-to-end flow
+6. Deploy to Chiado testnet for live testing
+7. Deploy to Gnosis mainnet
