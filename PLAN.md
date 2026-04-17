@@ -1107,3 +1107,11 @@ This is the final validation before mainnet deployment.
 - Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` with the new tunnel/debug findings
 - **Verification:** `cargo test` ✅ (**89 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen)
 - Solidity tests remain unavailable in this environment because `forge` is not installed on PATH
+
+**2026-04-18 (hourly check):** Step 18 helper improved — historical consolidation scan added
+- Extended `prover/crates/real-chain-test/src/main.rs` so `fetch-and-prove` accepts `--scan-start-slot` + `--scan-end-slot`
+- The binary now sweeps finalized history, stops on the first state with non-empty `pending_consolidations`, and records the scan window / first-hit slot in the emitted JSON snapshot
+- This turns Step 18 from manual single-slot probing into deterministic historical discovery work against the SSH-tunneled internal Lighthouse node
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the new range-scan workflow
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**90 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 1 real-chain-test unit test)
+- Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing

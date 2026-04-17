@@ -21,6 +21,7 @@
   - pending consolidation count
   - validator activation epoch + withdrawal credential summaries
   - debug endpoint availability notes
+  - optional historical scan metadata (`--scan-start-slot` / `--scan-end-slot`) so it can sweep finalized history and stop on the first non-empty `pending_consolidations` state
 
 **🔸 Still Blocked / Deferred:**
 - The currently finalized real-chain state has **0 pending consolidations**, so there is nothing real to prove yet
@@ -79,7 +80,7 @@ This step requires:
 ## Next Steps for Production
 
 1. Keep SSH tunnel workflow for internal beacon node access
-2. Extend `fetch-and-prove` (or a follow-up helper) to locate a historical/future state with non-empty `pending_consolidations`
+2. Use `fetch-and-prove --scan-start-slot <slot> --scan-end-slot <slot>` against the internal node to sweep finalized history for the first non-empty `pending_consolidations` state
 3. Generate a real proof bundle once such a state is found
 4. Deploy contract to local Anvil fork with real beacon roots
 5. Submit claims with real proofs to verify end-to-end flow

@@ -11,6 +11,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-17 update:** validated that the internal Lighthouse node also exposes the debug SSZ endpoint over SSH tunnel, and the upgraded `fetch-and-prove` binary can now export a richer real-chain snapshot. The finalized state tested on 2026-04-17 had zero pending consolidations, so proof generation remains waiting on a state that actually contains one.
 
+**2026-04-18 update:** `fetch-and-prove` can now scan a finalized slot range (`--scan-start-slot` / `--scan-end-slot`) and record scan metadata in the JSON snapshot. That reduces Step 18’s remaining work to historical/future data discovery instead of manual one-slot probing.
+
 ## Test Results
 
 ### Connection Details

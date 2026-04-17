@@ -24,6 +24,15 @@ struct Args {
     #[arg(long, default_value = "finalized")]
     state_id: String,
 
+    /// When set, scan finalized slots in [scan_start_slot, scan_end_slot] and stop at the
+    /// first state with pending consolidations. Defaults to the resolved state slot.
+    #[arg(long)]
+    scan_start_slot: Option<u64>,
+
+    /// Inclusive end of the historical scan window. Required when --scan-start-slot is set.
+    #[arg(long)]
+    scan_end_slot: Option<u64>,
+
     /// Gnosis genesis time used to derive beacon timestamps from slots
     #[arg(long, default_value_t = 1_638_993_340u64)]
     genesis_time: u64,
@@ -57,6 +66,7 @@ struct SnapshotMetadata {
     finalized_slot: u64,
     slot: u64,
     beacon_timestamp: u64,
+    scan_window: Option<ScanWindow>,
     block_root: String,
     state_root: String,
     state_size_bytes: Option<usize>,
@@ -66,6 +76,14 @@ struct SnapshotMetadata {
     credential_prefix_counts: BTreeMap<String, usize>,
     consolidations: Vec<ConsolidationSnapshot>,
     notes: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ScanWindow {
+    start_slot: u64,
+    end_slot: u64,
+    slots_checked: usize,
+    first_non_empty_slot: Option<u64>,
 }
 
 #[tokio::main]
@@ -83,9 +101,11 @@ async fn main() -> Result<()> {
         .context("Failed to fetch finality checkpoints")?;
 
     let default_finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
-    let resolved_slot = resolve_slot(&args.state_id, default_finalized_slot, &client)
+    let requested_slot = resolve_slot(&args.state_id, default_finalized_slot, &client)
         .await
         .context("Failed to resolve requested state into a slot")?;
+    let (resolved_slot, pending_consolidations, scan_window) =
+        resolve_target_state(&args, &client, requested_slot, default_finalized_slot).await?;
     let resolved_state_id = resolved_slot.to_string();
 
     println!("📍 Finality checkpoints:");
@@ -110,15 +130,10 @@ async fn main() -> Result<()> {
 
     println!("   State root: 0x{}", hex::encode(header.state_root));
     println!("   Block root: 0x{}\n", hex::encode(block_root));
-
-    println!("🧾 Fetching pending consolidations from standard Beacon API...");
-    let pending_consolidations = client
-        .get_pending_consolidations(&resolved_state_id)
-        .await
-        .context("Failed to fetch pending consolidations")?;
     println!(
-        "   Found {} pending consolidations\n",
-        pending_consolidations.len()
+        "🧾 Using {} pending consolidations from state {}\n",
+        pending_consolidations.len(),
+        resolved_state_id
     );
 
     let mut consolidations = Vec::new();
@@ -196,6 +211,19 @@ async fn main() -> Result<()> {
         }
     };
 
+    if let Some(scan_window) = &scan_window {
+        match scan_window.first_non_empty_slot {
+            Some(slot) => notes.push(format!(
+                "Historical scan checked {} finalized slots and found the first non-empty pending_consolidations state at slot {slot}.",
+                scan_window.slots_checked
+            )),
+            None => notes.push(format!(
+                "Historical scan checked {} finalized slots ({}..={}) and found no pending consolidations.",
+                scan_window.slots_checked, scan_window.start_slot, scan_window.end_slot
+            )),
+        }
+    }
+
     if pending_consolidations.len() > args.max_consolidations {
         notes.push(format!(
             "Snapshot truncated to the first {} pending consolidations out of {} total.",
@@ -218,6 +246,7 @@ async fn main() -> Result<()> {
         finalized_slot: default_finalized_slot,
         slot: resolved_slot,
         beacon_timestamp,
+        scan_window,
         block_root: format!("0x{}", hex::encode(block_root)),
         state_root: format!("0x{}", hex::encode(header.state_root)),
         state_size_bytes,
@@ -235,6 +264,12 @@ async fn main() -> Result<()> {
     println!("📊 Summary:");
     println!("   Slot: {}", metadata.slot);
     println!("   Beacon timestamp: {}", metadata.beacon_timestamp);
+    if let Some(scan_window) = &metadata.scan_window {
+        println!(
+            "   Scan window: {}..={} ({} slots checked)",
+            scan_window.start_slot, scan_window.end_slot, scan_window.slots_checked
+        );
+    }
     println!(
         "   Pending consolidations: {}",
         metadata.total_pending_consolidations
@@ -246,6 +281,95 @@ async fn main() -> Result<()> {
     println!("   Snapshot saved to: {}", args.output.display());
 
     Ok(())
+}
+
+async fn resolve_target_state(
+    args: &Args,
+    client: &BeaconClient,
+    requested_slot: u64,
+    finalized_slot: u64,
+) -> Result<(u64, Vec<PendingConsolidationJson>, Option<ScanWindow>)> {
+    if args.scan_start_slot.is_none() && args.scan_end_slot.is_none() {
+        let pending_consolidations = client
+            .get_pending_consolidations(&requested_slot.to_string())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to fetch pending consolidations for state {}",
+                    requested_slot
+                )
+            })?;
+        return Ok((requested_slot, pending_consolidations, None));
+    }
+
+    let scan_start_slot = args
+        .scan_start_slot
+        .context("--scan-end-slot requires --scan-start-slot")?;
+    let scan_end_slot = args
+        .scan_end_slot
+        .context("--scan-start-slot requires --scan-end-slot")?;
+
+    anyhow::ensure!(
+        scan_start_slot <= scan_end_slot,
+        "scan_start_slot must be <= scan_end_slot"
+    );
+    anyhow::ensure!(
+        scan_end_slot <= finalized_slot,
+        "scan_end_slot {scan_end_slot} exceeds finalized slot {finalized_slot}"
+    );
+    anyhow::ensure!(
+        requested_slot >= scan_start_slot && requested_slot <= scan_end_slot,
+        "resolved state slot {requested_slot} must be inside the scan window {scan_start_slot}..={scan_end_slot}"
+    );
+
+    println!(
+        "🕰️  Scanning finalized slots {}..={} for pending consolidations...",
+        scan_start_slot, scan_end_slot
+    );
+
+    let mut slots_checked = 0usize;
+    let mut fallback_pending = None;
+    for slot in scan_start_slot..=scan_end_slot {
+        let pending_consolidations = client
+            .get_pending_consolidations(&slot.to_string())
+            .await
+            .with_context(|| format!("Failed to fetch pending consolidations for slot {slot}"))?;
+        slots_checked += 1;
+
+        if slot == requested_slot {
+            fallback_pending = Some(pending_consolidations.clone());
+        }
+
+        if !pending_consolidations.is_empty() {
+            println!(
+                "   Found {} pending consolidations at slot {}",
+                pending_consolidations.len(),
+                slot
+            );
+            return Ok((
+                slot,
+                pending_consolidations,
+                Some(ScanWindow {
+                    start_slot: scan_start_slot,
+                    end_slot: scan_end_slot,
+                    slots_checked,
+                    first_non_empty_slot: Some(slot),
+                }),
+            ));
+        }
+    }
+
+    println!("   No pending consolidations found in scan window\n");
+    Ok((
+        requested_slot,
+        fallback_pending.unwrap_or_default(),
+        Some(ScanWindow {
+            start_slot: scan_start_slot,
+            end_slot: scan_end_slot,
+            slots_checked,
+            first_non_empty_slot: None,
+        }),
+    ))
 }
 
 async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient) -> Result<u64> {
@@ -373,5 +497,21 @@ mod tests {
         let counts = count_credential_prefixes(&consolidations);
         assert_eq!(counts.get("0x01"), Some(&2));
         assert_eq!(counts.get("0x02"), Some(&1));
+    }
+
+    #[test]
+    fn scan_window_serializes_first_non_empty_slot() {
+        let window = ScanWindow {
+            start_slot: 10,
+            end_slot: 20,
+            slots_checked: 11,
+            first_non_empty_slot: Some(14),
+        };
+
+        let json = serde_json::to_value(window).unwrap();
+        assert_eq!(json["start_slot"], 10);
+        assert_eq!(json["end_slot"], 20);
+        assert_eq!(json["slots_checked"], 11);
+        assert_eq!(json["first_non_empty_slot"], 14);
     }
 }
