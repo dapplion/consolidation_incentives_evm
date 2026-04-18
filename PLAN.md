@@ -1115,3 +1115,11 @@ This is the final validation before mainnet deployment.
 - Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the new range-scan workflow
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**90 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 1 real-chain-test unit test)
 - Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing
+
+**2026-04-19 (hourly check):** Step 18 helper improved again — scan stride + reverse search
+- Extended `fetch-and-prove` with `--scan-step-slots` (default: one Gnosis epoch / 16 slots) so historical sweeps stop hammering every single slot like a caffeinated woodpecker
+- Added `--scan-direction {forward,reverse}` so searches can bias toward the earliest or latest non-empty finalized state
+- Scan metadata written to the JSON snapshot now records stride + direction, making historical runs reproducible instead of vibes-based archaeology
+- Added unit coverage for stepped slot generation, reverse-order scans, and the richer scan-window JSON shape
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**92 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 3 real-chain-test unit tests)
+- Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing

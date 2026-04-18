@@ -13,6 +13,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-18 update:** `fetch-and-prove` can now scan a finalized slot range (`--scan-start-slot` / `--scan-end-slot`) and record scan metadata in the JSON snapshot. That reduces Step 18’s remaining work to historical/future data discovery instead of manual one-slot probing.
 
+**2026-04-19 update:** the historical scan supports configurable stride + direction (`--scan-step-slots`, `--scan-direction`), so real-chain searches can hop one finalized epoch at a time and search newest-first when looking for the most recent pending consolidation state.
+
 ## Test Results
 
 ### Connection Details

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use proof_gen::{
     beacon_client::BeaconClient,
     types::preset::{SECONDS_PER_SLOT, SLOTS_PER_EPOCH},
@@ -32,6 +32,14 @@ struct Args {
     /// Inclusive end of the historical scan window. Required when --scan-start-slot is set.
     #[arg(long)]
     scan_end_slot: Option<u64>,
+
+    /// Slot stride used during historical scans. Defaults to one finalized epoch on Gnosis.
+    #[arg(long, default_value_t = SLOTS_PER_EPOCH)]
+    scan_step_slots: u64,
+
+    /// Historical scan direction. `reverse` is handy when you want the latest non-empty state first.
+    #[arg(long, value_enum, default_value_t = ScanDirection::Forward)]
+    scan_direction: ScanDirection,
 
     /// Gnosis genesis time used to derive beacon timestamps from slots
     #[arg(long, default_value_t = 1_638_993_340u64)]
@@ -78,11 +86,19 @@ struct SnapshotMetadata {
     notes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ScanDirection {
+    Forward,
+    Reverse,
+}
+
 #[derive(Debug, serde::Serialize)]
 struct ScanWindow {
     start_slot: u64,
     end_slot: u64,
     slots_checked: usize,
+    scan_step_slots: u64,
+    scan_direction: String,
     first_non_empty_slot: Option<u64>,
 }
 
@@ -322,14 +338,30 @@ async fn resolve_target_state(
         "resolved state slot {requested_slot} must be inside the scan window {scan_start_slot}..={scan_end_slot}"
     );
 
+    anyhow::ensure!(
+        args.scan_step_slots > 0,
+        "scan_step_slots must be greater than zero"
+    );
+
+    let scan_slots = build_scan_slots(
+        scan_start_slot,
+        scan_end_slot,
+        args.scan_step_slots,
+        args.scan_direction,
+        requested_slot,
+    );
+
     println!(
-        "🕰️  Scanning finalized slots {}..={} for pending consolidations...",
-        scan_start_slot, scan_end_slot
+        "🕰️  Scanning finalized slots {}..={} for pending consolidations (step={}, direction={})...",
+        scan_start_slot,
+        scan_end_slot,
+        args.scan_step_slots,
+        args.scan_direction.as_str()
     );
 
     let mut slots_checked = 0usize;
     let mut fallback_pending = None;
-    for slot in scan_start_slot..=scan_end_slot {
+    for slot in scan_slots {
         let pending_consolidations = client
             .get_pending_consolidations(&slot.to_string())
             .await
@@ -353,6 +385,8 @@ async fn resolve_target_state(
                     start_slot: scan_start_slot,
                     end_slot: scan_end_slot,
                     slots_checked,
+                    scan_step_slots: args.scan_step_slots,
+                    scan_direction: args.scan_direction.as_str().to_string(),
                     first_non_empty_slot: Some(slot),
                 }),
             ));
@@ -367,6 +401,8 @@ async fn resolve_target_state(
             start_slot: scan_start_slot,
             end_slot: scan_end_slot,
             slots_checked,
+            scan_step_slots: args.scan_step_slots,
+            scan_direction: args.scan_direction.as_str().to_string(),
             first_non_empty_slot: None,
         }),
     ))
@@ -379,6 +415,50 @@ async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient
         other => other.parse::<u64>().with_context(|| {
             format!("unsupported state_id `{other}`; use finalized, head, or a slot")
         }),
+    }
+}
+
+fn build_scan_slots(
+    scan_start_slot: u64,
+    scan_end_slot: u64,
+    scan_step_slots: u64,
+    scan_direction: ScanDirection,
+    requested_slot: u64,
+) -> Vec<u64> {
+    let mut slots = Vec::new();
+    let mut slot = scan_start_slot;
+    while slot <= scan_end_slot {
+        slots.push(slot);
+        match slot.checked_add(scan_step_slots) {
+            Some(next) if next > slot => slot = next,
+            _ => break,
+        }
+    }
+
+    if slots.last().copied() != Some(scan_end_slot) {
+        slots.push(scan_end_slot);
+    }
+
+    if !slots.contains(&requested_slot) {
+        slots.push(requested_slot);
+    }
+
+    slots.sort_unstable();
+    slots.dedup();
+
+    if scan_direction == ScanDirection::Reverse {
+        slots.reverse();
+    }
+
+    slots
+}
+
+impl ScanDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Forward => "forward",
+            Self::Reverse => "reverse",
+        }
     }
 }
 
@@ -505,6 +585,8 @@ mod tests {
             start_slot: 10,
             end_slot: 20,
             slots_checked: 11,
+            scan_step_slots: 16,
+            scan_direction: "forward".to_string(),
             first_non_empty_slot: Some(14),
         };
 
@@ -512,6 +594,20 @@ mod tests {
         assert_eq!(json["start_slot"], 10);
         assert_eq!(json["end_slot"], 20);
         assert_eq!(json["slots_checked"], 11);
+        assert_eq!(json["scan_step_slots"], 16);
+        assert_eq!(json["scan_direction"], "forward");
         assert_eq!(json["first_non_empty_slot"], 14);
+    }
+
+    #[test]
+    fn build_scan_slots_uses_step_and_includes_requested_slot() {
+        let slots = build_scan_slots(100, 140, 16, ScanDirection::Forward, 133);
+        assert_eq!(slots, vec![100, 116, 132, 133, 140]);
+    }
+
+    #[test]
+    fn build_scan_slots_reverses_order_when_requested() {
+        let slots = build_scan_slots(100, 140, 16, ScanDirection::Reverse, 132);
+        assert_eq!(slots, vec![140, 132, 116, 100]);
     }
 }
