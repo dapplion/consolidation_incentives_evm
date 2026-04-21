@@ -1131,3 +1131,12 @@ This is the final validation before mainnet deployment.
 - Updated real-chain docs to prefer epoch-driven scans while keeping slot flags available for precise archaeology
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (real-chain-test unit tests now **12 passing**)
 - Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
+
+**2026-04-22 (hourly check):** Step 18 helper improved — historical scans now keep all hits
+- Extended `fetch-and-prove` scan metadata with `non_empty_slots` plus `last_non_empty_slot`
+- Historical scans no longer discard later hits after finding the first non-empty state; snapshots now preserve the full set of consolidation-bearing slots encountered in the requested window
+- This makes reverse scans much more useful for finding the latest eligible state while still keeping a reproducible trail of all observed hits
+- Added unit coverage for `ScanHit` serialization, chronological hit bounds under reverse scans, and the richer `ScanWindow` JSON shape
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the improved historical scan output
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**103 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 14 real-chain-test)
+- Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing

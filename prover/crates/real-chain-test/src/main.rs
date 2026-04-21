@@ -102,6 +102,12 @@ enum ScanDirection {
     Reverse,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct ScanHit {
+    slot: u64,
+    pending_consolidations: usize,
+}
+
 #[derive(Debug, serde::Serialize)]
 struct ScanWindow {
     start_slot: u64,
@@ -110,6 +116,8 @@ struct ScanWindow {
     scan_step_slots: u64,
     scan_direction: String,
     first_non_empty_slot: Option<u64>,
+    last_non_empty_slot: Option<u64>,
+    non_empty_slots: Vec<ScanHit>,
 }
 
 #[tokio::main]
@@ -239,10 +247,20 @@ async fn main() -> Result<()> {
 
     if let Some(scan_window) = &scan_window {
         match scan_window.first_non_empty_slot {
-            Some(slot) => notes.push(format!(
-                "Historical scan checked {} finalized slots and found the first non-empty pending_consolidations state at slot {slot}.",
-                scan_window.slots_checked
-            )),
+            Some(slot) => {
+                notes.push(format!(
+                    "Historical scan checked {} finalized slots and found the first non-empty pending_consolidations state at slot {slot}.",
+                    scan_window.slots_checked
+                ));
+                if let Some(last_slot) = scan_window.last_non_empty_slot {
+                    notes.push(format!(
+                        "Historical scan observed {} non-empty states spanning slots {}..={}.",
+                        scan_window.non_empty_slots.len(),
+                        slot,
+                        last_slot
+                    ));
+                }
+            }
             None => notes.push(format!(
                 "Historical scan checked {} finalized slots ({}..={}) and found no pending consolidations.",
                 scan_window.slots_checked, scan_window.start_slot, scan_window.end_slot
@@ -295,6 +313,14 @@ async fn main() -> Result<()> {
             "   Scan window: {}..={} ({} slots checked)",
             scan_window.start_slot, scan_window.end_slot, scan_window.slots_checked
         );
+        if !scan_window.non_empty_slots.is_empty() {
+            println!(
+                "   Non-empty slots found: {} (first={}, last={})",
+                scan_window.non_empty_slots.len(),
+                scan_window.first_non_empty_slot.unwrap_or_default(),
+                scan_window.last_non_empty_slot.unwrap_or_default()
+            );
+        }
     }
     println!(
         "   Pending consolidations: {}",
@@ -364,6 +390,9 @@ async fn resolve_target_state(
 
     let mut slots_checked = 0usize;
     let mut fallback_pending = None;
+    let mut first_hit: Option<(u64, Vec<PendingConsolidationJson>)> = None;
+    let mut non_empty_slots = Vec::new();
+
     for slot in scan_slots {
         let pending_consolidations = client
             .get_pending_consolidations(&slot.to_string())
@@ -381,33 +410,39 @@ async fn resolve_target_state(
                 pending_consolidations.len(),
                 slot
             );
-            return Ok((
+            non_empty_slots.push(ScanHit {
                 slot,
-                pending_consolidations,
-                Some(ScanWindow {
-                    start_slot: scan_start_slot,
-                    end_slot: scan_end_slot,
-                    slots_checked,
-                    scan_step_slots: args.scan_step_slots,
-                    scan_direction: args.scan_direction.as_str().to_string(),
-                    first_non_empty_slot: Some(slot),
-                }),
-            ));
+                pending_consolidations: pending_consolidations.len(),
+            });
+            if first_hit.is_none() {
+                first_hit = Some((slot, pending_consolidations.clone()));
+            }
         }
+    }
+
+    let first_non_empty_slot = min_hit_slot(&non_empty_slots);
+    let last_non_empty_slot = max_hit_slot(&non_empty_slots);
+
+    let scan_window = Some(ScanWindow {
+        start_slot: scan_start_slot,
+        end_slot: scan_end_slot,
+        slots_checked,
+        scan_step_slots: args.scan_step_slots,
+        scan_direction: args.scan_direction.as_str().to_string(),
+        first_non_empty_slot,
+        last_non_empty_slot,
+        non_empty_slots,
+    });
+
+    if let Some((slot, pending_consolidations)) = first_hit {
+        return Ok((slot, pending_consolidations, scan_window));
     }
 
     println!("   No pending consolidations found in scan window\n");
     Ok((
         requested_slot,
         fallback_pending.unwrap_or_default(),
-        Some(ScanWindow {
-            start_slot: scan_start_slot,
-            end_slot: scan_end_slot,
-            slots_checked,
-            scan_step_slots: args.scan_step_slots,
-            scan_direction: args.scan_direction.as_str().to_string(),
-            first_non_empty_slot: None,
-        }),
+        scan_window,
     ))
 }
 
@@ -508,6 +543,14 @@ impl ScanDirection {
             Self::Reverse => "reverse",
         }
     }
+}
+
+fn min_hit_slot(non_empty_slots: &[ScanHit]) -> Option<u64> {
+    non_empty_slots.iter().map(|hit| hit.slot).min()
+}
+
+fn max_hit_slot(non_empty_slots: &[ScanHit]) -> Option<u64> {
+    non_empty_slots.iter().map(|hit| hit.slot).max()
 }
 
 fn build_consolidation_snapshot(
@@ -636,6 +679,17 @@ mod tests {
             scan_step_slots: 16,
             scan_direction: "forward".to_string(),
             first_non_empty_slot: Some(14),
+            last_non_empty_slot: Some(18),
+            non_empty_slots: vec![
+                ScanHit {
+                    slot: 14,
+                    pending_consolidations: 2,
+                },
+                ScanHit {
+                    slot: 18,
+                    pending_consolidations: 4,
+                },
+            ],
         };
 
         let json = serde_json::to_value(window).unwrap();
@@ -645,6 +699,11 @@ mod tests {
         assert_eq!(json["scan_step_slots"], 16);
         assert_eq!(json["scan_direction"], "forward");
         assert_eq!(json["first_non_empty_slot"], 14);
+        assert_eq!(json["last_non_empty_slot"], 18);
+        assert_eq!(json["non_empty_slots"][0]["slot"], 14);
+        assert_eq!(json["non_empty_slots"][0]["pending_consolidations"], 2);
+        assert_eq!(json["non_empty_slots"][1]["slot"], 18);
+        assert_eq!(json["non_empty_slots"][1]["pending_consolidations"], 4);
     }
 
     #[test]
@@ -657,6 +716,27 @@ mod tests {
     fn build_scan_slots_reverses_order_when_requested() {
         let slots = build_scan_slots(100, 140, 16, ScanDirection::Reverse, 132);
         assert_eq!(slots, vec![140, 132, 116, 100]);
+    }
+
+    #[test]
+    fn hit_bounds_are_chronological_even_for_reverse_scan_order() {
+        let hits = vec![
+            ScanHit {
+                slot: 140,
+                pending_consolidations: 1,
+            },
+            ScanHit {
+                slot: 116,
+                pending_consolidations: 2,
+            },
+            ScanHit {
+                slot: 100,
+                pending_consolidations: 3,
+            },
+        ];
+
+        assert_eq!(min_hit_slot(&hits), Some(100));
+        assert_eq!(max_hit_slot(&hits), Some(140));
     }
 
     #[test]
@@ -716,5 +796,17 @@ mod tests {
         assert!(error
             .to_string()
             .contains("--scan-start-epoch requires --scan-end-epoch"));
+    }
+
+    #[test]
+    fn scan_hit_serialization_is_stable() {
+        let hit = ScanHit {
+            slot: 123,
+            pending_consolidations: 7,
+        };
+
+        let json = serde_json::to_value(hit).unwrap();
+        assert_eq!(json["slot"], 123);
+        assert_eq!(json["pending_consolidations"], 7);
     }
 }
