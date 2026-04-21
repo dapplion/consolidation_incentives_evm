@@ -15,6 +15,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-19 update:** the historical scan supports configurable stride + direction (`--scan-step-slots`, `--scan-direction`), so real-chain searches can hop one finalized epoch at a time and search newest-first when looking for the most recent pending consolidation state.
 
+**2026-04-20 update:** `fetch-and-prove` also accepts epoch-based scan windows (`--scan-start-epoch` / `--scan-end-epoch`), so historical searches no longer require manual slot arithmetic before each run.
+
 ## Test Results
 
 ### Connection Details

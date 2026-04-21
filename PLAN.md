@@ -1123,3 +1123,11 @@ This is the final validation before mainnet deployment.
 - Added unit coverage for stepped slot generation, reverse-order scans, and the richer scan-window JSON shape
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**92 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 3 real-chain-test unit tests)
 - Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
+
+**2026-04-20 (hourly check):** Step 18 helper improved — epoch-based historical scan windows
+- Extended `fetch-and-prove` with `--scan-start-epoch` / `--scan-end-epoch`
+- Epoch ranges are converted to inclusive slot windows automatically, so historical searches no longer require manual slot arithmetic
+- Added validation to reject mixed slot-based and epoch-based scan flags, plus tests for epoch conversion and missing-pair errors
+- Updated real-chain docs to prefer epoch-driven scans while keeping slot flags available for precise archaeology
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (real-chain-test unit tests now **12 passing**)
+- Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing

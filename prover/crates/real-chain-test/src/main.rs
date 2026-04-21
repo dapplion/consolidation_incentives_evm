@@ -33,6 +33,16 @@ struct Args {
     #[arg(long)]
     scan_end_slot: Option<u64>,
 
+    /// Historical scan start epoch. Converted to the first slot in that epoch.
+    /// Cannot be combined with --scan-start-slot.
+    #[arg(long)]
+    scan_start_epoch: Option<u64>,
+
+    /// Historical scan end epoch. Converted to the last slot in that epoch.
+    /// Cannot be combined with --scan-end-slot.
+    #[arg(long)]
+    scan_end_epoch: Option<u64>,
+
     /// Slot stride used during historical scans. Defaults to one finalized epoch on Gnosis.
     #[arg(long, default_value_t = SLOTS_PER_EPOCH)]
     scan_step_slots: u64,
@@ -305,7 +315,7 @@ async fn resolve_target_state(
     requested_slot: u64,
     finalized_slot: u64,
 ) -> Result<(u64, Vec<PendingConsolidationJson>, Option<ScanWindow>)> {
-    if args.scan_start_slot.is_none() && args.scan_end_slot.is_none() {
+    let Some((scan_start_slot, scan_end_slot)) = resolve_scan_window(args)? else {
         let pending_consolidations = client
             .get_pending_consolidations(&requested_slot.to_string())
             .await
@@ -316,14 +326,7 @@ async fn resolve_target_state(
                 )
             })?;
         return Ok((requested_slot, pending_consolidations, None));
-    }
-
-    let scan_start_slot = args
-        .scan_start_slot
-        .context("--scan-end-slot requires --scan-start-slot")?;
-    let scan_end_slot = args
-        .scan_end_slot
-        .context("--scan-start-slot requires --scan-end-slot")?;
+    };
 
     anyhow::ensure!(
         scan_start_slot <= scan_end_slot,
@@ -416,6 +419,51 @@ async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient
             format!("unsupported state_id `{other}`; use finalized, head, or a slot")
         }),
     }
+}
+
+fn resolve_scan_window(args: &Args) -> Result<Option<(u64, u64)>> {
+    let using_slot_range = args.scan_start_slot.is_some() || args.scan_end_slot.is_some();
+    let using_epoch_range = args.scan_start_epoch.is_some() || args.scan_end_epoch.is_some();
+
+    anyhow::ensure!(
+        !(using_slot_range && using_epoch_range),
+        "slot-based scan flags cannot be combined with epoch-based scan flags"
+    );
+
+    if using_slot_range {
+        let scan_start_slot = args
+            .scan_start_slot
+            .context("--scan-end-slot requires --scan-start-slot")?;
+        let scan_end_slot = args
+            .scan_end_slot
+            .context("--scan-start-slot requires --scan-end-slot")?;
+        return Ok(Some((scan_start_slot, scan_end_slot)));
+    }
+
+    if using_epoch_range {
+        let scan_start_epoch = args
+            .scan_start_epoch
+            .context("--scan-end-epoch requires --scan-start-epoch")?;
+        let scan_end_epoch = args
+            .scan_end_epoch
+            .context("--scan-start-epoch requires --scan-end-epoch")?;
+        anyhow::ensure!(
+            scan_start_epoch <= scan_end_epoch,
+            "scan_start_epoch must be <= scan_end_epoch"
+        );
+
+        let scan_start_slot = scan_start_epoch
+            .checked_mul(SLOTS_PER_EPOCH)
+            .context("scan_start_epoch overflowed when converted to slot")?;
+        let scan_end_slot = scan_end_epoch
+            .checked_add(1)
+            .and_then(|epoch| epoch.checked_mul(SLOTS_PER_EPOCH))
+            .and_then(|slot| slot.checked_sub(1))
+            .context("scan_end_epoch overflowed when converted to slot")?;
+        return Ok(Some((scan_start_slot, scan_end_slot)));
+    }
+
+    Ok(None)
 }
 
 fn build_scan_slots(
@@ -609,5 +657,64 @@ mod tests {
     fn build_scan_slots_reverses_order_when_requested() {
         let slots = build_scan_slots(100, 140, 16, ScanDirection::Reverse, 132);
         assert_eq!(slots, vec![140, 132, 116, 100]);
+    }
+
+    #[test]
+    fn resolve_scan_window_accepts_slot_range() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-start-slot",
+            "320",
+            "--scan-end-slot",
+            "400",
+        ]);
+
+        assert_eq!(resolve_scan_window(&args).unwrap(), Some((320, 400)));
+    }
+
+    #[test]
+    fn resolve_scan_window_converts_epoch_range_to_slots() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-start-epoch",
+            "10",
+            "--scan-end-epoch",
+            "12",
+        ]);
+
+        assert_eq!(
+            resolve_scan_window(&args).unwrap(),
+            Some((10 * SLOTS_PER_EPOCH, ((12 + 1) * SLOTS_PER_EPOCH) - 1))
+        );
+    }
+
+    #[test]
+    fn resolve_scan_window_rejects_mixed_slot_and_epoch_ranges() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-start-slot",
+            "320",
+            "--scan-end-slot",
+            "400",
+            "--scan-start-epoch",
+            "10",
+            "--scan-end-epoch",
+            "12",
+        ]);
+
+        let error = resolve_scan_window(&args).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("slot-based scan flags cannot be combined with epoch-based scan flags"));
+    }
+
+    #[test]
+    fn resolve_scan_window_requires_epoch_pairs() {
+        let args = Args::parse_from(["fetch-and-prove", "--scan-start-epoch", "10"]);
+
+        let error = resolve_scan_window(&args).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("--scan-start-epoch requires --scan-end-epoch"));
     }
 }
