@@ -21,7 +21,7 @@
   - pending consolidation count
   - validator activation epoch + withdrawal credential summaries
   - debug endpoint availability notes
-  - optional historical scan metadata (`--scan-start-slot` / `--scan-end-slot` or `--scan-start-epoch` / `--scan-end-epoch`)
+  - optional historical scan metadata (`--scan-start-slot` / `--scan-end-slot`, `--scan-start-epoch` / `--scan-end-epoch`, or `--scan-last-epochs <N>`)
   - configurable scan stride + direction (`--scan-step-slots`, `--scan-direction`) so it can sweep finalized history efficiently and either stop at the earliest or latest non-empty `pending_consolidations` state
   - a `non_empty_slots` summary in the scan window so historical runs record every hit that was observed, not just the first one
 
@@ -82,7 +82,7 @@ This step requires:
 ## Next Steps for Production
 
 1. Keep SSH tunnel workflow for internal beacon node access
-2. Use `fetch-and-prove --scan-start-epoch <epoch> --scan-end-epoch <epoch> --scan-step-slots 16 --scan-direction reverse` against the internal node to sweep finalized history for the latest non-empty `pending_consolidations` state (or use the slot flags if you already know the exact slot window). The emitted `scan_window.non_empty_slots` list now gives you a compact breadcrumb trail of every hit in that range.
+2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted `scan_window.non_empty_slots` list now gives you a compact breadcrumb trail of every hit in that range.
 3. Generate a real proof bundle once such a state is found
 4. Deploy contract to local Anvil fork with real beacon roots
 5. Submit claims with real proofs to verify end-to-end flow

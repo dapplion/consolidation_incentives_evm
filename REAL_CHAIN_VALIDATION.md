@@ -19,6 +19,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-22 update:** historical scan snapshots now persist every non-empty hit in `scan_window.non_empty_slots`, plus the first/last hit slots. That makes reverse scans useful for finding the newest consolidation-bearing state without throwing away the rest of the evidence.
 
+**2026-04-23 update:** `fetch-and-prove` now also supports `--scan-last-epochs <N>`, which derives a recent finalized scan window automatically. Same historical search, less caveman slot math.
+
 ## Test Results
 
 ### Connection Details

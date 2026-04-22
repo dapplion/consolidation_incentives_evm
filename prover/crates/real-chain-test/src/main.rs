@@ -34,14 +34,19 @@ struct Args {
     scan_end_slot: Option<u64>,
 
     /// Historical scan start epoch. Converted to the first slot in that epoch.
-    /// Cannot be combined with --scan-start-slot.
+    /// Cannot be combined with --scan-start-slot or --scan-last-epochs.
     #[arg(long)]
     scan_start_epoch: Option<u64>,
 
     /// Historical scan end epoch. Converted to the last slot in that epoch.
-    /// Cannot be combined with --scan-end-slot.
+    /// Cannot be combined with --scan-end-slot or --scan-last-epochs.
     #[arg(long)]
     scan_end_epoch: Option<u64>,
+
+    /// Scan the last N finalized epochs ending at the finalized slot.
+    /// Handy when you want a recent-history sweep without doing slot math by hand.
+    #[arg(long)]
+    scan_last_epochs: Option<u64>,
 
     /// Slot stride used during historical scans. Defaults to one finalized epoch on Gnosis.
     #[arg(long, default_value_t = SLOTS_PER_EPOCH)]
@@ -341,7 +346,7 @@ async fn resolve_target_state(
     requested_slot: u64,
     finalized_slot: u64,
 ) -> Result<(u64, Vec<PendingConsolidationJson>, Option<ScanWindow>)> {
-    let Some((scan_start_slot, scan_end_slot)) = resolve_scan_window(args)? else {
+    let Some((scan_start_slot, scan_end_slot)) = resolve_scan_window(args, finalized_slot)? else {
         let pending_consolidations = client
             .get_pending_consolidations(&requested_slot.to_string())
             .await
@@ -456,13 +461,18 @@ async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient
     }
 }
 
-fn resolve_scan_window(args: &Args) -> Result<Option<(u64, u64)>> {
+fn resolve_scan_window(args: &Args, finalized_slot: u64) -> Result<Option<(u64, u64)>> {
     let using_slot_range = args.scan_start_slot.is_some() || args.scan_end_slot.is_some();
     let using_epoch_range = args.scan_start_epoch.is_some() || args.scan_end_epoch.is_some();
+    let using_recent_epochs = args.scan_last_epochs.is_some();
 
     anyhow::ensure!(
-        !(using_slot_range && using_epoch_range),
-        "slot-based scan flags cannot be combined with epoch-based scan flags"
+        [using_slot_range, using_epoch_range, using_recent_epochs]
+            .into_iter()
+            .filter(|enabled| *enabled)
+            .count()
+            <= 1,
+        "slot-based, epoch-based, and recent-epoch scan flags are mutually exclusive"
     );
 
     if using_slot_range {
@@ -496,6 +506,20 @@ fn resolve_scan_window(args: &Args) -> Result<Option<(u64, u64)>> {
             .and_then(|slot| slot.checked_sub(1))
             .context("scan_end_epoch overflowed when converted to slot")?;
         return Ok(Some((scan_start_slot, scan_end_slot)));
+    }
+
+    if let Some(scan_last_epochs) = args.scan_last_epochs {
+        anyhow::ensure!(
+            scan_last_epochs > 0,
+            "--scan-last-epochs must be greater than zero"
+        );
+
+        let lookback_slots = scan_last_epochs
+            .checked_sub(1)
+            .and_then(|epochs| epochs.checked_mul(SLOTS_PER_EPOCH))
+            .context("scan_last_epochs overflowed when converted to slots")?;
+        let scan_start_slot = finalized_slot.saturating_sub(lookback_slots);
+        return Ok(Some((scan_start_slot, finalized_slot)));
     }
 
     Ok(None)
@@ -749,7 +773,7 @@ mod tests {
             "400",
         ]);
 
-        assert_eq!(resolve_scan_window(&args).unwrap(), Some((320, 400)));
+        assert_eq!(resolve_scan_window(&args, 999).unwrap(), Some((320, 400)));
     }
 
     #[test]
@@ -763,7 +787,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            resolve_scan_window(&args).unwrap(),
+            resolve_scan_window(&args, 999).unwrap(),
             Some((10 * SLOTS_PER_EPOCH, ((12 + 1) * SLOTS_PER_EPOCH) - 1))
         );
     }
@@ -782,20 +806,58 @@ mod tests {
             "12",
         ]);
 
-        let error = resolve_scan_window(&args).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("slot-based scan flags cannot be combined with epoch-based scan flags"));
+        let error = resolve_scan_window(&args, 999).unwrap_err();
+        assert!(error.to_string().contains(
+            "slot-based, epoch-based, and recent-epoch scan flags are mutually exclusive"
+        ));
     }
 
     #[test]
     fn resolve_scan_window_requires_epoch_pairs() {
         let args = Args::parse_from(["fetch-and-prove", "--scan-start-epoch", "10"]);
 
-        let error = resolve_scan_window(&args).unwrap_err();
+        let error = resolve_scan_window(&args, 999).unwrap_err();
         assert!(error
             .to_string()
             .contains("--scan-start-epoch requires --scan-end-epoch"));
+    }
+
+    #[test]
+    fn resolve_scan_window_supports_recent_finalized_epochs() {
+        let args = Args::parse_from(["fetch-and-prove", "--scan-last-epochs", "3"]);
+
+        assert_eq!(
+            resolve_scan_window(&args, 320).unwrap(),
+            Some((320 - (2 * SLOTS_PER_EPOCH), 320))
+        );
+    }
+
+    #[test]
+    fn resolve_scan_window_rejects_zero_recent_epochs() {
+        let args = Args::parse_from(["fetch-and-prove", "--scan-last-epochs", "0"]);
+
+        let error = resolve_scan_window(&args, 320).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("--scan-last-epochs must be greater than zero"));
+    }
+
+    #[test]
+    fn resolve_scan_window_rejects_recent_epochs_with_explicit_ranges() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-last-epochs",
+            "3",
+            "--scan-start-epoch",
+            "10",
+            "--scan-end-epoch",
+            "12",
+        ]);
+
+        let error = resolve_scan_window(&args, 320).unwrap_err();
+        assert!(error.to_string().contains(
+            "slot-based, epoch-based, and recent-epoch scan flags are mutually exclusive"
+        ));
     }
 
     #[test]

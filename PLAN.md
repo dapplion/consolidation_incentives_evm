@@ -1140,3 +1140,10 @@ This is the final validation before mainnet deployment.
 - Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the improved historical scan output
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**103 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 14 real-chain-test)
 - Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
+
+**2026-04-23 (hourly check):** Step 18 helper improved — recent-history scans without manual slot math
+- Added `--scan-last-epochs <N>` to `fetch-and-prove`, deriving an inclusive finalized scan window automatically from the current finalized slot
+- Kept it mutually exclusive with explicit slot/epoch windows so the CLI fails loudly instead of doing something cursed
+- Added unit coverage for recent-window derivation, zero-value rejection, and mixed-flag validation
+- Updated `REAL_CHAIN_TESTING.md` / `REAL_CHAIN_VALIDATION.md` to document the new shortcut
+- Next practical move: run `fetch-and-prove --scan-last-epochs <N> --scan-direction reverse` against the internal beacon tunnel and see if history finally contains a non-empty pending consolidation state
