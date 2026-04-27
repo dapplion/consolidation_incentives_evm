@@ -56,6 +56,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ScanDirection::Forward)]
     scan_direction: ScanDirection,
 
+    /// Stop a historical scan after collecting this many non-empty states.
+    /// Useful when you only need the first/latest few hits instead of sweeping the entire window.
+    #[arg(long)]
+    scan_hit_limit: Option<usize>,
+
     /// Gnosis genesis time used to derive beacon timestamps from slots
     #[arg(long, default_value_t = 1_638_993_340u64)]
     genesis_time: u64,
@@ -120,6 +125,7 @@ struct ScanWindow {
     slots_checked: usize,
     scan_step_slots: u64,
     scan_direction: String,
+    scan_hit_limit: Option<usize>,
     first_non_empty_slot: Option<u64>,
     last_non_empty_slot: Option<u64>,
     non_empty_slots: Vec<ScanHit>,
@@ -398,6 +404,8 @@ async fn resolve_target_state(
     let mut first_hit: Option<(u64, Vec<PendingConsolidationJson>)> = None;
     let mut non_empty_slots = Vec::new();
 
+    validate_scan_hit_limit(args.scan_hit_limit)?;
+
     for slot in scan_slots {
         let pending_consolidations = client
             .get_pending_consolidations(&slot.to_string())
@@ -422,6 +430,16 @@ async fn resolve_target_state(
             if first_hit.is_none() {
                 first_hit = Some((slot, pending_consolidations.clone()));
             }
+            if args
+                .scan_hit_limit
+                .is_some_and(|limit| non_empty_slots.len() >= limit)
+            {
+                println!(
+                    "   Reached scan hit limit ({} non-empty states); stopping early",
+                    non_empty_slots.len()
+                );
+                break;
+            }
         }
     }
 
@@ -434,6 +452,7 @@ async fn resolve_target_state(
         slots_checked,
         scan_step_slots: args.scan_step_slots,
         scan_direction: args.scan_direction.as_str().to_string(),
+        scan_hit_limit: args.scan_hit_limit,
         first_non_empty_slot,
         last_non_empty_slot,
         non_empty_slots,
@@ -523,6 +542,14 @@ fn resolve_scan_window(args: &Args, finalized_slot: u64) -> Result<Option<(u64, 
     }
 
     Ok(None)
+}
+
+fn validate_scan_hit_limit(scan_hit_limit: Option<usize>) -> Result<()> {
+    if let Some(limit) = scan_hit_limit {
+        anyhow::ensure!(limit > 0, "scan_hit_limit must be greater than zero");
+    }
+
+    Ok(())
 }
 
 fn build_scan_slots(
@@ -702,6 +729,7 @@ mod tests {
             slots_checked: 11,
             scan_step_slots: 16,
             scan_direction: "forward".to_string(),
+            scan_hit_limit: Some(2),
             first_non_empty_slot: Some(14),
             last_non_empty_slot: Some(18),
             non_empty_slots: vec![
@@ -722,12 +750,27 @@ mod tests {
         assert_eq!(json["slots_checked"], 11);
         assert_eq!(json["scan_step_slots"], 16);
         assert_eq!(json["scan_direction"], "forward");
+        assert_eq!(json["scan_hit_limit"], 2);
         assert_eq!(json["first_non_empty_slot"], 14);
         assert_eq!(json["last_non_empty_slot"], 18);
         assert_eq!(json["non_empty_slots"][0]["slot"], 14);
         assert_eq!(json["non_empty_slots"][0]["pending_consolidations"], 2);
         assert_eq!(json["non_empty_slots"][1]["slot"], 18);
         assert_eq!(json["non_empty_slots"][1]["pending_consolidations"], 4);
+    }
+
+    #[test]
+    fn validate_scan_hit_limit_rejects_zero() {
+        let error = validate_scan_hit_limit(Some(0)).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("scan_hit_limit must be greater than zero"));
+    }
+
+    #[test]
+    fn validate_scan_hit_limit_accepts_none_and_positive_values() {
+        validate_scan_hit_limit(None).unwrap();
+        validate_scan_hit_limit(Some(3)).unwrap();
     }
 
     #[test]

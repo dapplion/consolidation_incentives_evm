@@ -21,6 +21,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-23 update:** `fetch-and-prove` now also supports `--scan-last-epochs <N>`, which derives a recent finalized scan window automatically. Same historical search, less caveman slot math.
 
+**2026-04-27 update:** historical scans now also support `--scan-hit-limit <N>`, which stops the sweep after collecting enough non-empty states. Handy when reverse scans already found the newest few candidate consolidation-bearing slots and you don’t need to keep digging to the geological center of the earth.
+
 ## Test Results
 
 ### Connection Details
