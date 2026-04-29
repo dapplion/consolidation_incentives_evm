@@ -1157,3 +1157,16 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**108 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 19 real-chain-test)
 - Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
 - Next practical move: run `fetch-and-prove --scan-last-epochs <N> --scan-direction reverse --scan-hit-limit 1` against the internal beacon tunnel to quickly probe for the latest real consolidation-bearing state
+
+**2026-04-29 (hourly check):** Step 18 helper improved — scan snapshots now carry epoch metadata
+- Extended `fetch-and-prove` scan output with epoch-aware metadata:
+  - `start_epoch` / `end_epoch` on the scan window
+  - per-hit `epoch` inside `non_empty_slots`
+  - `first_non_empty_epoch` / `last_non_empty_epoch`
+- Added a regression test covering the no-hit case so empty historical scans serialize `null` epoch bounds instead of drifting later
+- Updated console summary output to show both slot and epoch ranges/hit bounds
+- This makes historical scan artifacts immediately useful in beacon-history discussions and follow-up commands, instead of requiring manual slot→epoch conversion after each run
+- Updated `REAL_CHAIN_TESTING.md` / `REAL_CHAIN_VALIDATION.md` to document the richer snapshot shape
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**109 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 20 real-chain-test)
+- Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
+- Next practical move: run the reverse recent-history scan against the internal SSH tunnel and use the new epoch metadata to zero in on any consolidation-bearing finalized state faster

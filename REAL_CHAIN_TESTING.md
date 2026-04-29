@@ -25,6 +25,7 @@
   - configurable scan stride + direction (`--scan-step-slots`, `--scan-direction`) so it can sweep finalized history efficiently and either stop at the earliest or latest non-empty `pending_consolidations` state
   - optional early-stop hit limit (`--scan-hit-limit <N>`) so long archaeology runs can stop once enough non-empty states have been collected
   - a `non_empty_slots` summary in the scan window so historical runs record every hit that was observed, not just the first one
+  - epoch metadata (`start_epoch`, `end_epoch`, per-hit `epoch`, first/last non-empty epochs) so scan snapshots line up with beacon-history discussions without manual slot→epoch conversion
 
 **🔸 Still Blocked / Deferred:**
 - The currently finalized real-chain state has **0 pending consolidations**, so there is nothing real to prove yet
@@ -83,7 +84,7 @@ This step requires:
 ## Next Steps for Production
 
 1. Keep SSH tunnel workflow for internal beacon node access
-2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted `scan_window.non_empty_slots` list now gives you a compact breadcrumb trail of every hit in that range, and the hit limit keeps long scans from pointlessly chewing through the whole window once enough candidate states are found.
+2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted scan window now includes both slot and epoch breadcrumbs (`start_epoch`, `end_epoch`, `first_non_empty_epoch`, `last_non_empty_epoch`, plus per-hit epochs), so you can talk about candidate states in human terms instead of raw slot numerology.
 3. Generate a real proof bundle once such a state is found
 4. Deploy contract to local Anvil fork with real beacon roots
 5. Submit claims with real proofs to verify end-to-end flow

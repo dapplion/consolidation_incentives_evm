@@ -115,6 +115,7 @@ enum ScanDirection {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct ScanHit {
     slot: u64,
+    epoch: u64,
     pending_consolidations: usize,
 }
 
@@ -122,12 +123,16 @@ struct ScanHit {
 struct ScanWindow {
     start_slot: u64,
     end_slot: u64,
+    start_epoch: u64,
+    end_epoch: u64,
     slots_checked: usize,
     scan_step_slots: u64,
     scan_direction: String,
     scan_hit_limit: Option<usize>,
     first_non_empty_slot: Option<u64>,
     last_non_empty_slot: Option<u64>,
+    first_non_empty_epoch: Option<u64>,
+    last_non_empty_epoch: Option<u64>,
     non_empty_slots: Vec<ScanHit>,
 }
 
@@ -321,15 +326,21 @@ async fn main() -> Result<()> {
     println!("   Beacon timestamp: {}", metadata.beacon_timestamp);
     if let Some(scan_window) = &metadata.scan_window {
         println!(
-            "   Scan window: {}..={} ({} slots checked)",
-            scan_window.start_slot, scan_window.end_slot, scan_window.slots_checked
+            "   Scan window: slots {}..={} / epochs {}..={} ({} slots checked)",
+            scan_window.start_slot,
+            scan_window.end_slot,
+            scan_window.start_epoch,
+            scan_window.end_epoch,
+            scan_window.slots_checked
         );
         if !scan_window.non_empty_slots.is_empty() {
             println!(
-                "   Non-empty slots found: {} (first={}, last={})",
+                "   Non-empty slots found: {} (first slot={} / epoch={}, last slot={} / epoch={})",
                 scan_window.non_empty_slots.len(),
                 scan_window.first_non_empty_slot.unwrap_or_default(),
-                scan_window.last_non_empty_slot.unwrap_or_default()
+                scan_window.first_non_empty_epoch.unwrap_or_default(),
+                scan_window.last_non_empty_slot.unwrap_or_default(),
+                scan_window.last_non_empty_epoch.unwrap_or_default()
             );
         }
     }
@@ -425,6 +436,7 @@ async fn resolve_target_state(
             );
             non_empty_slots.push(ScanHit {
                 slot,
+                epoch: slot / SLOTS_PER_EPOCH,
                 pending_consolidations: pending_consolidations.len(),
             });
             if first_hit.is_none() {
@@ -449,12 +461,16 @@ async fn resolve_target_state(
     let scan_window = Some(ScanWindow {
         start_slot: scan_start_slot,
         end_slot: scan_end_slot,
+        start_epoch: scan_start_slot / SLOTS_PER_EPOCH,
+        end_epoch: scan_end_slot / SLOTS_PER_EPOCH,
         slots_checked,
         scan_step_slots: args.scan_step_slots,
         scan_direction: args.scan_direction.as_str().to_string(),
         scan_hit_limit: args.scan_hit_limit,
         first_non_empty_slot,
         last_non_empty_slot,
+        first_non_empty_epoch: first_non_empty_slot.map(|slot| slot / SLOTS_PER_EPOCH),
+        last_non_empty_epoch: last_non_empty_slot.map(|slot| slot / SLOTS_PER_EPOCH),
         non_empty_slots,
     });
 
@@ -726,19 +742,25 @@ mod tests {
         let window = ScanWindow {
             start_slot: 10,
             end_slot: 20,
+            start_epoch: 0,
+            end_epoch: 1,
             slots_checked: 11,
             scan_step_slots: 16,
             scan_direction: "forward".to_string(),
             scan_hit_limit: Some(2),
             first_non_empty_slot: Some(14),
             last_non_empty_slot: Some(18),
+            first_non_empty_epoch: Some(0),
+            last_non_empty_epoch: Some(1),
             non_empty_slots: vec![
                 ScanHit {
                     slot: 14,
+                    epoch: 0,
                     pending_consolidations: 2,
                 },
                 ScanHit {
                     slot: 18,
+                    epoch: 1,
                     pending_consolidations: 4,
                 },
             ],
@@ -751,12 +773,44 @@ mod tests {
         assert_eq!(json["scan_step_slots"], 16);
         assert_eq!(json["scan_direction"], "forward");
         assert_eq!(json["scan_hit_limit"], 2);
+        assert_eq!(json["start_epoch"], 0);
+        assert_eq!(json["end_epoch"], 1);
         assert_eq!(json["first_non_empty_slot"], 14);
         assert_eq!(json["last_non_empty_slot"], 18);
+        assert_eq!(json["first_non_empty_epoch"], 0);
+        assert_eq!(json["last_non_empty_epoch"], 1);
         assert_eq!(json["non_empty_slots"][0]["slot"], 14);
+        assert_eq!(json["non_empty_slots"][0]["epoch"], 0);
         assert_eq!(json["non_empty_slots"][0]["pending_consolidations"], 2);
         assert_eq!(json["non_empty_slots"][1]["slot"], 18);
+        assert_eq!(json["non_empty_slots"][1]["epoch"], 1);
         assert_eq!(json["non_empty_slots"][1]["pending_consolidations"], 4);
+    }
+
+    #[test]
+    fn scan_window_serializes_null_epochs_when_no_hits_exist() {
+        let window = ScanWindow {
+            start_slot: 32,
+            end_slot: 63,
+            start_epoch: 2,
+            end_epoch: 3,
+            slots_checked: 2,
+            scan_step_slots: 16,
+            scan_direction: "reverse".to_string(),
+            scan_hit_limit: None,
+            first_non_empty_slot: None,
+            last_non_empty_slot: None,
+            first_non_empty_epoch: None,
+            last_non_empty_epoch: None,
+            non_empty_slots: vec![],
+        };
+
+        let json = serde_json::to_value(window).unwrap();
+        assert_eq!(json["start_epoch"], 2);
+        assert_eq!(json["end_epoch"], 3);
+        assert!(json["first_non_empty_epoch"].is_null());
+        assert!(json["last_non_empty_epoch"].is_null());
+        assert!(json["non_empty_slots"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -790,14 +844,17 @@ mod tests {
         let hits = vec![
             ScanHit {
                 slot: 140,
+                epoch: 8,
                 pending_consolidations: 1,
             },
             ScanHit {
                 slot: 116,
+                epoch: 7,
                 pending_consolidations: 2,
             },
             ScanHit {
                 slot: 100,
+                epoch: 6,
                 pending_consolidations: 3,
             },
         ];
@@ -907,11 +964,13 @@ mod tests {
     fn scan_hit_serialization_is_stable() {
         let hit = ScanHit {
             slot: 123,
+            epoch: 7,
             pending_consolidations: 7,
         };
 
         let json = serde_json::to_value(hit).unwrap();
         assert_eq!(json["slot"], 123);
+        assert_eq!(json["epoch"], 7);
         assert_eq!(json["pending_consolidations"], 7);
     }
 }

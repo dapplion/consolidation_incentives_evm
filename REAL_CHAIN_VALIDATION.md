@@ -23,6 +23,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-27 update:** historical scans now also support `--scan-hit-limit <N>`, which stops the sweep after collecting enough non-empty states. Handy when reverse scans already found the newest few candidate consolidation-bearing slots and you don’t need to keep digging to the geological center of the earth.
 
+**2026-04-29 update:** scan snapshots now persist epoch metadata alongside slot metadata (`start_epoch`, `end_epoch`, per-hit epochs, first/last non-empty epochs). That makes historical scan output immediately readable during beacon archaeology instead of forcing manual slot math after every run.
+
 ## Test Results
 
 ### Connection Details
