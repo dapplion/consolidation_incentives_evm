@@ -1170,3 +1170,17 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**109 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 56 proof-gen + 20 real-chain-test)
 - Solidity tests still cannot be run here because `forge` is not installed on PATH; historical baseline remains 68 passing
 - Next practical move: run the reverse recent-history scan against the internal SSH tunnel and use the new epoch metadata to zero in on any consolidation-bearing finalized state faster
+
+**2026-04-30 (hourly check):** Step 18 historical scan hardened + infrastructure constraint confirmed
+- Ran the planned reverse recent-history scan against the internal Lighthouse node over SSH tunnel:
+  - `cargo run -p real-chain-test -- --beacon-url http://127.0.0.1:14000 --state-id finalized --scan-last-epochs 512 --scan-direction reverse --scan-hit-limit 1`
+- Found a real failure mode in the archaeology path: missed-slot 404s and pruned-historical-state 404s were indistinguishable, so scans could grind backward uselessly.
+- Fixed `real-chain-test` to:
+  - fall back to the nearest earlier slot when the requested slot simply has no beacon state
+  - preserve both `requested_slot` and resolved `slot` in `non_empty_slots` metadata
+  - detect the stronger case where a beacon header exists but the corresponding historical state is unavailable, and fail fast with a clear pruning error instead of sweeping the whole window
+- Tightened `proof-gen::BeaconClient` 404 handling so numeric `pending_consolidations` / validator lookups return `StateNotFound(slot)`.
+- Added unit coverage for fallback scans, no-state windows, pruned-state detection, and the new `requested_slot` JSON field.
+- **Observed infrastructure constraint:** the internal node serves the current finalized state (`/states/finalized` and the current finalized slot), but older finalized-slot state lookups return 404 even when `/headers/{slot}` succeeds. In other words: historical header retention exists, historical state retention does not.
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**114 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 23 real-chain-test)
+- Step 18 is now blocked on access to a beacon node that retains historical states (or on capturing the needed state live when pending consolidations exist), not on scan ergonomics anymore.

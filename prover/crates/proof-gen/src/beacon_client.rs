@@ -225,9 +225,12 @@ impl BeaconClient {
         let response = self.client.get(&url).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(BeaconClientError::InvalidResponse(format!(
-                "pending_consolidations not found for state_id={state_id}"
-            )));
+            return match state_id.parse::<u64>() {
+                Ok(slot) => Err(BeaconClientError::StateNotFound(slot)),
+                Err(_) => Err(BeaconClientError::InvalidResponse(format!(
+                    "pending_consolidations not found for state_id={state_id}"
+                ))),
+            };
         }
 
         if !response.status().is_success() {
@@ -285,9 +288,12 @@ impl BeaconClient {
         let response = self.client.get(&url).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(BeaconClientError::InvalidResponse(format!(
-                "validator {validator_id} not found for state_id={state_id}"
-            )));
+            return match state_id.parse::<u64>() {
+                Ok(slot) => Err(BeaconClientError::StateNotFound(slot)),
+                Err(_) => Err(BeaconClientError::InvalidResponse(format!(
+                    "validator {validator_id} not found for state_id={state_id}"
+                ))),
+            };
         }
 
         if !response.status().is_success() {
@@ -574,6 +580,50 @@ mod tests {
         assert_eq!(result[0].target_index, 100);
         assert_eq!(result[1].source_index, 7);
         assert_eq!(result[1].target_index, 8);
+    }
+
+    #[tokio::test]
+    async fn test_get_pending_consolidations_not_found_returns_state_not_found() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/12345/pending_consolidations"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_pending_consolidations("12345").await;
+
+        assert!(matches!(
+            result,
+            Err(BeaconClientError::StateNotFound(12345))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_validator_info_not_found_returns_state_not_found() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/12345/validators/42"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let result = client.get_validator_info("12345", 42).await;
+
+        assert!(matches!(
+            result,
+            Err(BeaconClientError::StateNotFound(12345))
+        ));
     }
 
     #[tokio::test]

@@ -25,6 +25,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-29 update:** scan snapshots now persist epoch metadata alongside slot metadata (`start_epoch`, `end_epoch`, per-hit epochs, first/last non-empty epochs). That makes historical scan output immediately readable during beacon archaeology instead of forcing manual slot math after every run.
 
+**2026-04-30 update:** reverse recent-history scan reached a firmer conclusion: the internal Lighthouse node keeps older finalized **headers**, but older finalized **states** for `pending_consolidations` are not available. The upgraded scanner now distinguishes missed-slot 404s from pruned-state 404s, falls back to earlier slots when possible, and fails fast with a pruning-specific error when a header exists but the state is gone.
+
 ## Test Results
 
 ### Connection Details
@@ -78,7 +80,8 @@ BEACON_API_URL=http://localhost:15052 cargo run --example test_scanner
 2. **Debug-state access is production-ready** — internal beacon node can serve full finalized SSZ over SSH tunnel
 3. **EIP-7251 is active** — Electra endpoints available on Gnosis
 4. **No consolidations yet** — Program will have no claims initially (expected)
-5. **Remaining blocker is data availability, not infrastructure** — we now need a state with at least one pending consolidation to generate a real proof bundle
+5. **Historical state retention is now a real infrastructure blocker** — this node can answer current finalized-state queries, but not arbitrary older finalized-state queries needed for archaeology
+6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query
 
 ## Access Setup for Production
 

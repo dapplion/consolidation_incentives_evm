@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use proof_gen::{
-    beacon_client::BeaconClient,
+    beacon_client::{BeaconClient, BeaconClientError},
     types::preset::{SECONDS_PER_SLOT, SLOTS_PER_EPOCH},
     PendingConsolidationJson, ValidatorInfo,
 };
@@ -114,6 +114,7 @@ enum ScanDirection {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct ScanHit {
+    requested_slot: u64,
     slot: u64,
     epoch: u64,
     pending_consolidations: usize,
@@ -417,30 +418,44 @@ async fn resolve_target_state(
 
     validate_scan_hit_limit(args.scan_hit_limit)?;
 
-    for slot in scan_slots {
-        let pending_consolidations = client
-            .get_pending_consolidations(&slot.to_string())
-            .await
-            .with_context(|| format!("Failed to fetch pending consolidations for slot {slot}"))?;
+    for requested_scan_slot in scan_slots {
+        let (resolved_scan_slot, pending_consolidations) =
+            fetch_pending_consolidations_at_or_before(client, requested_scan_slot, scan_start_slot)
+                .await
+                .with_context(|| {
+                    format!(
+                "Failed to fetch pending consolidations for slot {} or earlier within scan window",
+                requested_scan_slot
+            )
+                })?;
         slots_checked += 1;
 
-        if slot == requested_slot {
+        if requested_scan_slot == requested_slot {
             fallback_pending = Some(pending_consolidations.clone());
+        }
+
+        if resolved_scan_slot != requested_scan_slot {
+            println!(
+                "   Requested slot {} had no state; fell back to slot {}",
+                requested_scan_slot, resolved_scan_slot
+            );
         }
 
         if !pending_consolidations.is_empty() {
             println!(
-                "   Found {} pending consolidations at slot {}",
+                "   Found {} pending consolidations at slot {} (requested {})",
                 pending_consolidations.len(),
-                slot
+                resolved_scan_slot,
+                requested_scan_slot
             );
             non_empty_slots.push(ScanHit {
-                slot,
-                epoch: slot / SLOTS_PER_EPOCH,
+                requested_slot: requested_scan_slot,
+                slot: resolved_scan_slot,
+                epoch: resolved_scan_slot / SLOTS_PER_EPOCH,
                 pending_consolidations: pending_consolidations.len(),
             });
             if first_hit.is_none() {
-                first_hit = Some((slot, pending_consolidations.clone()));
+                first_hit = Some((resolved_scan_slot, pending_consolidations.clone()));
             }
             if args
                 .scan_hit_limit
@@ -566,6 +581,42 @@ fn validate_scan_hit_limit(scan_hit_limit: Option<usize>) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn fetch_pending_consolidations_at_or_before(
+    client: &BeaconClient,
+    requested_slot: u64,
+    minimum_slot: u64,
+) -> Result<(u64, Vec<PendingConsolidationJson>)> {
+    let mut slot = requested_slot;
+
+    loop {
+        match client.get_pending_consolidations(&slot.to_string()).await {
+            Ok(pending_consolidations) => return Ok((slot, pending_consolidations)),
+            Err(BeaconClientError::StateNotFound(_)) => {
+                match client.get_header(&slot.to_string()).await {
+                    Ok(_) => {
+                        anyhow::bail!(
+                        "beacon header exists at slot {} but beacon state is unavailable; historical state lookups appear pruned on this node",
+                        slot
+                    );
+                    }
+                    Err(BeaconClientError::HeaderNotFound(_)) if slot > minimum_slot => {
+                        slot -= 1;
+                    }
+                    Err(BeaconClientError::HeaderNotFound(_)) => {
+                        anyhow::bail!(
+                            "no beacon state found at or before slot {} within lower bound {}",
+                            requested_slot,
+                            minimum_slot
+                        );
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 fn build_scan_slots(
@@ -754,11 +805,13 @@ mod tests {
             last_non_empty_epoch: Some(1),
             non_empty_slots: vec![
                 ScanHit {
+                    requested_slot: 14,
                     slot: 14,
                     epoch: 0,
                     pending_consolidations: 2,
                 },
                 ScanHit {
+                    requested_slot: 18,
                     slot: 18,
                     epoch: 1,
                     pending_consolidations: 4,
@@ -779,9 +832,11 @@ mod tests {
         assert_eq!(json["last_non_empty_slot"], 18);
         assert_eq!(json["first_non_empty_epoch"], 0);
         assert_eq!(json["last_non_empty_epoch"], 1);
+        assert_eq!(json["non_empty_slots"][0]["requested_slot"], 14);
         assert_eq!(json["non_empty_slots"][0]["slot"], 14);
         assert_eq!(json["non_empty_slots"][0]["epoch"], 0);
         assert_eq!(json["non_empty_slots"][0]["pending_consolidations"], 2);
+        assert_eq!(json["non_empty_slots"][1]["requested_slot"], 18);
         assert_eq!(json["non_empty_slots"][1]["slot"], 18);
         assert_eq!(json["non_empty_slots"][1]["epoch"], 1);
         assert_eq!(json["non_empty_slots"][1]["pending_consolidations"], 4);
@@ -843,16 +898,19 @@ mod tests {
     fn hit_bounds_are_chronological_even_for_reverse_scan_order() {
         let hits = vec![
             ScanHit {
+                requested_slot: 140,
                 slot: 140,
                 epoch: 8,
                 pending_consolidations: 1,
             },
             ScanHit {
+                requested_slot: 116,
                 slot: 116,
                 epoch: 7,
                 pending_consolidations: 2,
             },
             ScanHit {
+                requested_slot: 100,
                 slot: 100,
                 epoch: 6,
                 pending_consolidations: 3,
@@ -963,14 +1021,128 @@ mod tests {
     #[test]
     fn scan_hit_serialization_is_stable() {
         let hit = ScanHit {
+            requested_slot: 124,
             slot: 123,
             epoch: 7,
             pending_consolidations: 7,
         };
 
         let json = serde_json::to_value(hit).unwrap();
+        assert_eq!(json["requested_slot"], 124);
         assert_eq!(json["slot"], 123);
         assert_eq!(json["epoch"], 7);
         assert_eq!(json["pending_consolidations"], 7);
+    }
+
+    #[tokio::test]
+    async fn fetch_pending_consolidations_walks_back_to_previous_available_slot() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let response_json = r#"{
+            "data": [
+                {"source_index": "42", "target_index": "100"}
+            ]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/120/pending_consolidations"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/120"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/119/pending_consolidations"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let (resolved_slot, pending) = fetch_pending_consolidations_at_or_before(&client, 120, 110)
+            .await
+            .unwrap();
+
+        assert_eq!(resolved_slot, 119);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].source_index, 42);
+    }
+
+    #[tokio::test]
+    async fn fetch_pending_consolidations_errors_when_no_state_exists_in_window() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        for slot in [120_u64, 119, 118] {
+            Mock::given(method("GET"))
+                .and(path(format!(
+                    "/eth/v1/beacon/states/{slot}/pending_consolidations"
+                )))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&mock_server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path(format!("/eth/v1/beacon/headers/{slot}")))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&mock_server)
+                .await;
+        }
+
+        let client = BeaconClient::new(mock_server.uri());
+        let error = fetch_pending_consolidations_at_or_before(&client, 120, 118)
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("no beacon state found at or before slot 120 within lower bound 118"));
+    }
+
+    #[tokio::test]
+    async fn fetch_pending_consolidations_detects_pruned_historical_state() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let header_json = r#"{
+            "data": {
+                "header": {
+                    "message": {
+                        "slot": "120",
+                        "proposer_index": "42",
+                        "parent_root": "0x0101010101010101010101010101010101010101010101010101010101010101",
+                        "state_root": "0x0202020202020202020202020202020202020202020202020202020202020202",
+                        "body_root": "0x0303030303030303030303030303030303030303030303030303030303030303"
+                    }
+                }
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/120/pending_consolidations"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/headers/120"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(header_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = BeaconClient::new(mock_server.uri());
+        let error = fetch_pending_consolidations_at_or_before(&client, 120, 100)
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("historical state lookups appear pruned on this node"));
     }
 }

@@ -29,7 +29,10 @@
 
 **🔸 Still Blocked / Deferred:**
 - The currently finalized real-chain state has **0 pending consolidations**, so there is nothing real to prove yet
-- Step 18's original “generate proofs for actual consolidations” sub-goal still requires a historical or future state with non-empty `pending_consolidations`
+- Historical archaeology against the internal Lighthouse node is more limited than it first looked: older finalized-slot headers remain queryable, but older finalized-slot **states** for `pending_consolidations` return 404. So the node retains enough history for block metadata, not enough for arbitrary historical state scans.
+- Step 18's original “generate proofs for actual consolidations” sub-goal therefore still requires either:
+  - a beacon node that retains historical states, or
+  - capturing the needed state live when pending consolidations actually exist
 - Step 19 still depends on obtaining at least one real consolidation proof bundle
 
 **Options to Unblock:**
@@ -84,8 +87,9 @@ This step requires:
 ## Next Steps for Production
 
 1. Keep SSH tunnel workflow for internal beacon node access
-2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted scan window now includes both slot and epoch breadcrumbs (`start_epoch`, `end_epoch`, `first_non_empty_epoch`, `last_non_empty_epoch`, plus per-hit epochs), so you can talk about candidate states in human terms instead of raw slot numerology.
-3. Generate a real proof bundle once such a state is found
+2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted scan window now includes both slot and epoch breadcrumbs (`start_epoch`, `end_epoch`, `first_non_empty_epoch`, `last_non_empty_epoch`, plus per-hit epochs), and each hit records both the original `requested_slot` and the resolved `slot` used after missed-slot fallback.
+3. If the scan fails with `beacon header exists ... but beacon state is unavailable`, stop blaming the scanner — that's the node refusing historical state lookups, not a missed-slot issue. Use a non-pruning node or wait to capture the state live.
+4. Generate a real proof bundle once such a state is found
 4. Deploy contract to local Anvil fork with real beacon roots
 5. Submit claims with real proofs to verify end-to-end flow
 6. Deploy to Chiado testnet for live testing
