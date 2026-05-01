@@ -3,10 +3,11 @@ use clap::{Parser, ValueEnum};
 use proof_gen::{
     beacon_client::{BeaconClient, BeaconClientError},
     types::preset::{SECONDS_PER_SLOT, SLOTS_PER_EPOCH},
-    PendingConsolidationJson, ValidatorInfo,
+    FinalityCheckpoints, PendingConsolidationJson, ValidatorInfo,
 };
 use ssz_rs::HashTreeRoot;
 use std::{collections::BTreeMap, fs, path::PathBuf};
+use tokio::time::{sleep, Duration};
 
 #[derive(Parser, Debug)]
 #[command(name = "fetch-and-prove")]
@@ -64,6 +65,19 @@ struct Args {
     /// Gnosis genesis time used to derive beacon timestamps from slots
     #[arg(long, default_value_t = 1_638_993_340u64)]
     genesis_time: u64,
+
+    /// Watch finalized states until a non-empty pending_consolidations state appears.
+    /// Useful when historical state retention is limited and you need to capture the state live.
+    #[arg(long)]
+    watch_finalized: bool,
+
+    /// Poll interval in seconds for --watch-finalized.
+    #[arg(long, default_value_t = SECONDS_PER_SLOT)]
+    watch_poll_seconds: u64,
+
+    /// Optional cap on finalized-state polls before exiting.
+    #[arg(long)]
+    watch_max_polls: Option<usize>,
 
     /// Maximum number of pending consolidations to inspect in detail
     #[arg(long, default_value_t = 25)]
@@ -146,17 +160,24 @@ async fn main() -> Result<()> {
     println!("Using beacon endpoint: {}", args.beacon_url);
     println!("Requested state: {}\n", args.state_id);
 
-    let finality = client
+    let initial_finality = client
         .get_finality_checkpoints()
         .await
         .context("Failed to fetch finality checkpoints")?;
 
-    let default_finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+    let default_finalized_slot = initial_finality.finalized_epoch * SLOTS_PER_EPOCH;
     let requested_slot = resolve_slot(&args.state_id, default_finalized_slot, &client)
         .await
         .context("Failed to resolve requested state into a slot")?;
-    let (resolved_slot, pending_consolidations, scan_window) =
-        resolve_target_state(&args, &client, requested_slot, default_finalized_slot).await?;
+    let (resolved_slot, pending_consolidations, scan_window, watch_summary, finality) =
+        resolve_target_state(
+            &args,
+            &client,
+            requested_slot,
+            default_finalized_slot,
+            &initial_finality,
+        )
+        .await?;
     let resolved_state_id = resolved_slot.to_string();
 
     println!("📍 Finality checkpoints:");
@@ -285,6 +306,23 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Some(watch_summary) = &watch_summary {
+        if watch_summary.found_non_empty_state {
+            notes.push(format!(
+                "Finalized watch captured a non-empty state after {} poll(s); first hit slot {} (epoch {}).",
+                watch_summary.polls,
+                watch_summary.resolved_slot,
+                watch_summary.resolved_slot / SLOTS_PER_EPOCH
+            ));
+        } else {
+            notes.push(format!(
+                "Finalized watch ended after {} poll(s) without finding pending consolidations; latest finalized slot checked was {}.",
+                watch_summary.polls,
+                watch_summary.resolved_slot
+            ));
+        }
+    }
+
     if pending_consolidations.len() > args.max_consolidations {
         notes.push(format!(
             "Snapshot truncated to the first {} pending consolidations out of {} total.",
@@ -358,12 +396,53 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct WatchSummary {
+    polls: usize,
+    poll_interval_seconds: u64,
+    max_polls: Option<usize>,
+    resolved_slot: u64,
+    found_non_empty_state: bool,
+}
+
 async fn resolve_target_state(
     args: &Args,
     client: &BeaconClient,
     requested_slot: u64,
     finalized_slot: u64,
-) -> Result<(u64, Vec<PendingConsolidationJson>, Option<ScanWindow>)> {
+    finality: &FinalityCheckpoints,
+) -> Result<(
+    u64,
+    Vec<PendingConsolidationJson>,
+    Option<ScanWindow>,
+    Option<WatchSummary>,
+    FinalityCheckpoints,
+)> {
+    if args.watch_finalized {
+        anyhow::ensure!(
+            !has_scan_window(args),
+            "--watch-finalized cannot be combined with historical scan flags"
+        );
+        anyhow::ensure!(
+            !has_non_default_scan_controls(args),
+            "--watch-finalized cannot be combined with scan-step-slots, scan-direction, or scan-hit-limit"
+        );
+        anyhow::ensure!(
+            args.state_id == "finalized",
+            "--watch-finalized currently requires --state-id finalized"
+        );
+
+        let (resolved_slot, pending_consolidations, watch_summary, finality) =
+            watch_finalized_state(args, client, finality).await?;
+        return Ok((
+            resolved_slot,
+            pending_consolidations,
+            None,
+            Some(watch_summary),
+            finality,
+        ));
+    }
+
     let Some((scan_start_slot, scan_end_slot)) = resolve_scan_window(args, finalized_slot)? else {
         let pending_consolidations = client
             .get_pending_consolidations(&requested_slot.to_string())
@@ -374,7 +453,13 @@ async fn resolve_target_state(
                     requested_slot
                 )
             })?;
-        return Ok((requested_slot, pending_consolidations, None));
+        return Ok((
+            requested_slot,
+            pending_consolidations,
+            None,
+            None,
+            finality.clone(),
+        ));
     };
 
     anyhow::ensure!(
@@ -490,7 +575,13 @@ async fn resolve_target_state(
     });
 
     if let Some((slot, pending_consolidations)) = first_hit {
-        return Ok((slot, pending_consolidations, scan_window));
+        return Ok((
+            slot,
+            pending_consolidations,
+            scan_window,
+            None,
+            finality.clone(),
+        ));
     }
 
     println!("   No pending consolidations found in scan window\n");
@@ -498,7 +589,94 @@ async fn resolve_target_state(
         requested_slot,
         fallback_pending.unwrap_or_default(),
         scan_window,
+        None,
+        finality.clone(),
     ))
+}
+
+async fn watch_finalized_state(
+    args: &Args,
+    client: &BeaconClient,
+    initial_finality: &FinalityCheckpoints,
+) -> Result<(
+    u64,
+    Vec<PendingConsolidationJson>,
+    WatchSummary,
+    FinalityCheckpoints,
+)> {
+    anyhow::ensure!(
+        args.watch_poll_seconds > 0,
+        "watch_poll_seconds must be greater than zero"
+    );
+    validate_scan_hit_limit(args.watch_max_polls)?;
+
+    println!(
+        "👀 Watching finalized state every {}s for pending consolidations...",
+        args.watch_poll_seconds
+    );
+
+    let mut polls = 0usize;
+
+    loop {
+        let finality = if polls == 0 {
+            initial_finality.clone()
+        } else {
+            client
+                .get_finality_checkpoints()
+                .await
+                .context("Failed to refresh finality checkpoints during watch")?
+        };
+        let finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+        let pending_consolidations = client
+            .get_pending_consolidations(&finalized_slot.to_string())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to fetch pending consolidations for finalized slot {} during watch",
+                    finalized_slot
+                )
+            })?;
+        polls += 1;
+
+        println!(
+            "   poll #{polls}: finalized slot {} (epoch {}) -> {} pending consolidations",
+            finalized_slot,
+            finality.finalized_epoch,
+            pending_consolidations.len()
+        );
+
+        if !pending_consolidations.is_empty() {
+            return Ok((
+                finalized_slot,
+                pending_consolidations,
+                WatchSummary {
+                    polls,
+                    poll_interval_seconds: args.watch_poll_seconds,
+                    max_polls: args.watch_max_polls,
+                    resolved_slot: finalized_slot,
+                    found_non_empty_state: true,
+                },
+                finality,
+            ));
+        }
+
+        if args.watch_max_polls.is_some_and(|limit| polls >= limit) {
+            return Ok((
+                finalized_slot,
+                pending_consolidations,
+                WatchSummary {
+                    polls,
+                    poll_interval_seconds: args.watch_poll_seconds,
+                    max_polls: args.watch_max_polls,
+                    resolved_slot: finalized_slot,
+                    found_non_empty_state: false,
+                },
+                finality,
+            ));
+        }
+
+        sleep(Duration::from_secs(args.watch_poll_seconds)).await;
+    }
 }
 
 async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient) -> Result<u64> {
@@ -509,6 +687,20 @@ async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient
             format!("unsupported state_id `{other}`; use finalized, head, or a slot")
         }),
     }
+}
+
+fn has_scan_window(args: &Args) -> bool {
+    args.scan_start_slot.is_some()
+        || args.scan_end_slot.is_some()
+        || args.scan_start_epoch.is_some()
+        || args.scan_end_epoch.is_some()
+        || args.scan_last_epochs.is_some()
+}
+
+fn has_non_default_scan_controls(args: &Args) -> bool {
+    args.scan_step_slots != SLOTS_PER_EPOCH
+        || args.scan_direction != ScanDirection::Forward
+        || args.scan_hit_limit.is_some()
 }
 
 fn resolve_scan_window(args: &Args, finalized_slot: u64) -> Result<Option<(u64, u64)>> {
@@ -1019,6 +1211,51 @@ mod tests {
     }
 
     #[test]
+    fn has_scan_window_detects_any_scan_flag() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-start-epoch",
+            "10",
+            "--scan-end-epoch",
+            "12",
+        ]);
+
+        assert!(has_scan_window(&args));
+    }
+
+    #[test]
+    fn has_scan_window_is_false_without_scan_flags() {
+        let args = Args::parse_from(["fetch-and-prove"]);
+        assert!(!has_scan_window(&args));
+    }
+
+    #[test]
+    fn has_non_default_scan_controls_detects_modified_scan_knobs() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--scan-step-slots",
+            "32",
+            "--scan-direction",
+            "reverse",
+            "--scan-hit-limit",
+            "1",
+        ]);
+
+        assert!(has_non_default_scan_controls(&args));
+    }
+
+    #[test]
+    fn has_non_default_scan_controls_is_false_for_defaults() {
+        let args = Args::parse_from(["fetch-and-prove"]);
+        assert!(!has_non_default_scan_controls(&args));
+    }
+
+    #[test]
+    fn watch_mode_reuses_positive_limit_validation() {
+        validate_scan_hit_limit(Some(5)).unwrap();
+    }
+
+    #[test]
     fn scan_hit_serialization_is_stable() {
         let hit = ScanHit {
             requested_slot: 124,
@@ -1032,6 +1269,175 @@ mod tests {
         assert_eq!(json["slot"], 123);
         assert_eq!(json["epoch"], 7);
         assert_eq!(json["pending_consolidations"], 7);
+    }
+
+    fn sample_finality(epoch: u64) -> FinalityCheckpoints {
+        FinalityCheckpoints {
+            previous_justified_epoch: epoch.saturating_sub(2),
+            current_justified_epoch: epoch.saturating_sub(1),
+            finalized_epoch: epoch,
+            finalized_root: [0x11; 32],
+        }
+    }
+
+    #[tokio::test]
+    async fn watch_finalized_state_stops_on_first_non_empty_poll() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let finalized_slot = 100 * SLOTS_PER_EPOCH;
+        let response_json = r#"{
+            "data": [
+                {"source_index": "42", "target_index": "100"}
+            ]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/eth/v1/beacon/states/{finalized_slot}/pending_consolidations"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_json))
+            .mount(&mock_server)
+            .await;
+
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "1",
+        ]);
+        let client = BeaconClient::new(mock_server.uri());
+
+        let (resolved_slot, pending, watch_summary, finality) =
+            watch_finalized_state(&args, &client, &sample_finality(100))
+                .await
+                .unwrap();
+
+        assert_eq!(resolved_slot, finalized_slot);
+        assert_eq!(finality.finalized_epoch, 100);
+        assert_eq!(pending.len(), 1);
+        assert!(watch_summary.found_non_empty_state);
+        assert_eq!(watch_summary.polls, 1);
+        assert_eq!(watch_summary.poll_interval_seconds, 1);
+        assert_eq!(watch_summary.max_polls, None);
+    }
+
+    #[tokio::test]
+    async fn watch_finalized_state_respects_max_polls_when_empty() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let finalized_slot = 100 * SLOTS_PER_EPOCH;
+        let finality_json = format!(
+            r#"{{
+                "data": {{
+                    "previous_justified": {{
+                        "epoch": "98",
+                        "root": "0x{root}"
+                    }},
+                    "current_justified": {{
+                        "epoch": "99",
+                        "root": "0x{root}"
+                    }},
+                    "finalized": {{
+                        "epoch": "100",
+                        "root": "0x{root}"
+                    }}
+                }}
+            }}"#,
+            root = "11".repeat(32)
+        );
+
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/eth/v1/beacon/states/{finalized_slot}/pending_consolidations"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data": []}"#))
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/head/finality_checkpoints"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(finality_json))
+            .mount(&mock_server)
+            .await;
+
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "1",
+            "--watch-max-polls",
+            "2",
+        ]);
+        let client = BeaconClient::new(mock_server.uri());
+
+        let (resolved_slot, pending, watch_summary, finality) =
+            watch_finalized_state(&args, &client, &sample_finality(100))
+                .await
+                .unwrap();
+
+        assert_eq!(resolved_slot, finalized_slot);
+        assert_eq!(finality.finalized_epoch, 100);
+        assert!(pending.is_empty());
+        assert!(!watch_summary.found_non_empty_state);
+        assert_eq!(watch_summary.polls, 2);
+        assert_eq!(watch_summary.max_polls, Some(2));
+    }
+
+    #[tokio::test]
+    async fn watch_finalized_state_rejects_zero_poll_seconds() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "0",
+        ]);
+        let client = BeaconClient::new("http://127.0.0.1:1");
+
+        let error = watch_finalized_state(&args, &client, &sample_finality(100))
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("watch_poll_seconds must be greater than zero"));
+    }
+
+    #[tokio::test]
+    async fn resolve_target_state_rejects_watch_mode_with_non_default_scan_controls() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--scan-direction",
+            "reverse",
+        ]);
+        let client = BeaconClient::new("http://127.0.0.1:1");
+        let finality = sample_finality(100);
+        let finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+
+        let error = resolve_target_state(&args, &client, finalized_slot, finalized_slot, &finality)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains(
+            "--watch-finalized cannot be combined with scan-step-slots, scan-direction, or scan-hit-limit"
+        ));
+    }
+
+    #[tokio::test]
+    async fn resolve_target_state_rejects_watch_mode_with_non_finalized_state_id() {
+        let args = Args::parse_from(["fetch-and-prove", "--watch-finalized", "--state-id", "head"]);
+        let client = BeaconClient::new("http://127.0.0.1:1");
+        let finality = sample_finality(100);
+        let finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+
+        let error = resolve_target_state(&args, &client, finalized_slot, finalized_slot, &finality)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("--watch-finalized currently requires --state-id finalized"));
     }
 
     #[tokio::test]

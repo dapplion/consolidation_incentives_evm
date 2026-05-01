@@ -27,6 +27,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-04-30 update:** reverse recent-history scan reached a firmer conclusion: the internal Lighthouse node keeps older finalized **headers**, but older finalized **states** for `pending_consolidations` are not available. The upgraded scanner now distinguishes missed-slot 404s from pruned-state 404s, falls back to earlier slots when possible, and fails fast with a pruning-specific error when a header exists but the state is gone.
 
+**2026-05-01 update:** `fetch-and-prove` now also supports `--watch-finalized`, plus `--watch-poll-seconds` / `--watch-max-polls`, so Step 18 can capture a real consolidation-bearing finalized state live instead of relying only on historical scans that the node may already have pruned.
+
 ## Test Results
 
 ### Connection Details
@@ -81,7 +83,7 @@ BEACON_API_URL=http://localhost:15052 cargo run --example test_scanner
 3. **EIP-7251 is active** — Electra endpoints available on Gnosis
 4. **No consolidations yet** — Program will have no claims initially (expected)
 5. **Historical state retention is now a real infrastructure blocker** — this node can answer current finalized-state queries, but not arbitrary older finalized-state queries needed for archaeology
-6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query
+6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query; the new finalized watch mode covers the second part by letting us grab the current finalized state live before it ages out.
 
 ## Access Setup for Production
 

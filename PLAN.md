@@ -1184,3 +1184,13 @@ This is the final validation before mainnet deployment.
 - **Observed infrastructure constraint:** the internal node serves the current finalized state (`/states/finalized` and the current finalized slot), but older finalized-slot state lookups return 404 even when `/headers/{slot}` succeeds. In other words: historical header retention exists, historical state retention does not.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**114 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 23 real-chain-test)
 - Step 18 is now blocked on access to a beacon node that retains historical states (or on capturing the needed state live when pending consolidations exist), not on scan ergonomics anymore.
+**2026-05-01 (hourly check):** Step 18 live-capture path improved — finalized watch mode added
+- Added `--watch-finalized` to `fetch-and-prove` so the tool can poll the current finalized state until `pending_consolidations` becomes non-empty.
+- Added `--watch-poll-seconds` and `--watch-max-polls` to control cadence and stop conditions during live capture.
+- This directly addresses the current infrastructure reality: historical state retention is weak, so the reliable way to catch a real consolidation-bearing state is to watch finalized head live instead of doing post-mortem archaeology.
+- Guardrails added:
+  - watch mode currently requires `--state-id finalized`
+  - watch mode rejects historical scan flags instead of trying to combine incompatible workflows
+- Added direct watch-mode coverage for first-hit capture, max-poll exit, zero-second rejection, and invalid watch flag combinations.
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**124 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 33 real-chain-test)
+- Next practical move: run `cargo run -p real-chain-test -- --beacon-url http://127.0.0.1:14000 --state-id finalized --watch-finalized --watch-poll-seconds 80` over the SSH tunnel and let it sit there until the chain finally coughs up a pending consolidation.

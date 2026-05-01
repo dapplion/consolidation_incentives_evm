@@ -26,13 +26,14 @@
   - optional early-stop hit limit (`--scan-hit-limit <N>`) so long archaeology runs can stop once enough non-empty states have been collected
   - a `non_empty_slots` summary in the scan window so historical runs record every hit that was observed, not just the first one
   - epoch metadata (`start_epoch`, `end_epoch`, per-hit `epoch`, first/last non-empty epochs) so scan snapshots line up with beacon-history discussions without manual slot→epoch conversion
+  - a live finalized-state watcher (`--watch-finalized`, with `--watch-poll-seconds` / `--watch-max-polls`) for catching the first non-empty state before historical retention eats the evidence
 
 **🔸 Still Blocked / Deferred:**
 - The currently finalized real-chain state has **0 pending consolidations**, so there is nothing real to prove yet
 - Historical archaeology against the internal Lighthouse node is more limited than it first looked: older finalized-slot headers remain queryable, but older finalized-slot **states** for `pending_consolidations` return 404. So the node retains enough history for block metadata, not enough for arbitrary historical state scans.
 - Step 18's original “generate proofs for actual consolidations” sub-goal therefore still requires either:
   - a beacon node that retains historical states, or
-  - capturing the needed state live when pending consolidations actually exist
+  - capturing the needed state live when pending consolidations actually exist (the new watcher mode is built for exactly this)
 - Step 19 still depends on obtaining at least one real consolidation proof bundle
 
 **Options to Unblock:**
@@ -88,9 +89,10 @@ This step requires:
 
 1. Keep SSH tunnel workflow for internal beacon node access
 2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted scan window now includes both slot and epoch breadcrumbs (`start_epoch`, `end_epoch`, `first_non_empty_epoch`, `last_non_empty_epoch`, plus per-hit epochs), and each hit records both the original `requested_slot` and the resolved `slot` used after missed-slot fallback.
-3. If the scan fails with `beacon header exists ... but beacon state is unavailable`, stop blaming the scanner — that's the node refusing historical state lookups, not a missed-slot issue. Use a non-pruning node or wait to capture the state live.
-4. Generate a real proof bundle once such a state is found
-4. Deploy contract to local Anvil fork with real beacon roots
-5. Submit claims with real proofs to verify end-to-end flow
-6. Deploy to Chiado testnet for live testing
-7. Deploy to Gnosis mainnet
+3. When archaeology fails because history is pruned, switch to live capture instead of arguing with the node: `fetch-and-prove --state-id finalized --watch-finalized --watch-poll-seconds 80` (optionally add `--watch-max-polls <N>` if you want it to stop on its own).
+4. If the scan fails with `beacon header exists ... but beacon state is unavailable`, stop blaming the scanner — that's the node refusing historical state lookups, not a missed-slot issue. Use a non-pruning node or wait to capture the state live.
+5. Generate a real proof bundle once such a state is found
+6. Deploy contract to local Anvil fork with real beacon roots
+7. Submit claims with real proofs to verify end-to-end flow
+8. Deploy to Chiado testnet for live testing
+9. Deploy to Gnosis mainnet
