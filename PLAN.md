@@ -1194,3 +1194,15 @@ This is the final validation before mainnet deployment.
 - Added direct watch-mode coverage for first-hit capture, max-poll exit, zero-second rejection, and invalid watch flag combinations.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**124 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 33 real-chain-test)
 - Next practical move: run `cargo run -p real-chain-test -- --beacon-url http://127.0.0.1:14000 --state-id finalized --watch-finalized --watch-poll-seconds 80` over the SSH tunnel and let it sit there until the chain finally coughs up a pending consolidation.
+
+**2026-05-03 (hourly check):** Step 18 watch loop de-duplicated — no more redundant finalized-state fetch spam
+- Improved `fetch-and-prove --watch-finalized` so it now skips `pending_consolidations` lookups when the finalized slot has not advanced since the previous poll.
+- Added richer watch summary metadata:
+  - `state_checks`
+  - `skipped_unchanged_finality_polls`
+- This keeps the live-capture path cheap even when polling more frequently than Gnosis finality advances.
+- Added direct coverage for:
+  - unchanged-finality max-poll exit (only one state fetch, one skipped poll)
+  - resumed checking once finalized slot advances
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the de-duplicated watch behavior.
+- Next practical move stays the same: keep a finalized watch running against the SSH-tunneled internal node and wait for an actual consolidation-bearing state.

@@ -309,16 +309,24 @@ async fn main() -> Result<()> {
     if let Some(watch_summary) = &watch_summary {
         if watch_summary.found_non_empty_state {
             notes.push(format!(
-                "Finalized watch captured a non-empty state after {} poll(s); first hit slot {} (epoch {}).",
+                "Finalized watch captured a non-empty state after {} poll(s) and {} state check(s); first hit slot {} (epoch {}).",
                 watch_summary.polls,
+                watch_summary.state_checks,
                 watch_summary.resolved_slot,
                 watch_summary.resolved_slot / SLOTS_PER_EPOCH
             ));
         } else {
             notes.push(format!(
-                "Finalized watch ended after {} poll(s) without finding pending consolidations; latest finalized slot checked was {}.",
+                "Finalized watch ended after {} poll(s) and {} state check(s) without finding pending consolidations; latest finalized slot checked was {}.",
                 watch_summary.polls,
+                watch_summary.state_checks,
                 watch_summary.resolved_slot
+            ));
+        }
+        if watch_summary.skipped_unchanged_finality_polls > 0 {
+            notes.push(format!(
+                "Watch mode skipped {} redundant finalized-state poll(s) where the finalized slot had not advanced yet.",
+                watch_summary.skipped_unchanged_finality_polls
             ));
         }
     }
@@ -399,6 +407,8 @@ async fn main() -> Result<()> {
 #[derive(Debug, Clone, serde::Serialize)]
 struct WatchSummary {
     polls: usize,
+    state_checks: usize,
+    skipped_unchanged_finality_polls: usize,
     poll_interval_seconds: u64,
     max_polls: Option<usize>,
     resolved_slot: u64,
@@ -616,6 +626,9 @@ async fn watch_finalized_state(
     );
 
     let mut polls = 0usize;
+    let mut state_checks = 0usize;
+    let mut skipped_unchanged_finality_polls = 0usize;
+    let mut last_checked_finalized_slot = None;
 
     loop {
         let finality = if polls == 0 {
@@ -627,6 +640,37 @@ async fn watch_finalized_state(
                 .context("Failed to refresh finality checkpoints during watch")?
         };
         let finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+        polls += 1;
+
+        if last_checked_finalized_slot == Some(finalized_slot) {
+            skipped_unchanged_finality_polls += 1;
+            println!(
+                "   poll #{polls}: finalized slot {} (epoch {}) unchanged, skipping pending_consolidations fetch",
+                finalized_slot,
+                finality.finalized_epoch,
+            );
+
+            if args.watch_max_polls.is_some_and(|limit| polls >= limit) {
+                return Ok((
+                    finalized_slot,
+                    Vec::new(),
+                    WatchSummary {
+                        polls,
+                        state_checks,
+                        skipped_unchanged_finality_polls,
+                        poll_interval_seconds: args.watch_poll_seconds,
+                        max_polls: args.watch_max_polls,
+                        resolved_slot: finalized_slot,
+                        found_non_empty_state: false,
+                    },
+                    finality,
+                ));
+            }
+
+            sleep(Duration::from_secs(args.watch_poll_seconds)).await;
+            continue;
+        }
+
         let pending_consolidations = client
             .get_pending_consolidations(&finalized_slot.to_string())
             .await
@@ -636,7 +680,8 @@ async fn watch_finalized_state(
                     finalized_slot
                 )
             })?;
-        polls += 1;
+        last_checked_finalized_slot = Some(finalized_slot);
+        state_checks += 1;
 
         println!(
             "   poll #{polls}: finalized slot {} (epoch {}) -> {} pending consolidations",
@@ -651,6 +696,8 @@ async fn watch_finalized_state(
                 pending_consolidations,
                 WatchSummary {
                     polls,
+                    state_checks,
+                    skipped_unchanged_finality_polls,
                     poll_interval_seconds: args.watch_poll_seconds,
                     max_polls: args.watch_max_polls,
                     resolved_slot: finalized_slot,
@@ -666,6 +713,8 @@ async fn watch_finalized_state(
                 pending_consolidations,
                 WatchSummary {
                     polls,
+                    state_checks,
+                    skipped_unchanged_finality_polls,
                     poll_interval_seconds: args.watch_poll_seconds,
                     max_polls: args.watch_max_polls,
                     resolved_slot: finalized_slot,
@@ -1319,6 +1368,8 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert!(watch_summary.found_non_empty_state);
         assert_eq!(watch_summary.polls, 1);
+        assert_eq!(watch_summary.state_checks, 1);
+        assert_eq!(watch_summary.skipped_unchanged_finality_polls, 0);
         assert_eq!(watch_summary.poll_interval_seconds, 1);
         assert_eq!(watch_summary.max_polls, None);
     }
@@ -1355,7 +1406,7 @@ mod tests {
                 "/eth/v1/beacon/states/{finalized_slot}/pending_consolidations"
             )))
             .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data": []}"#))
-            .expect(2)
+            .expect(1)
             .mount(&mock_server)
             .await;
         Mock::given(method("GET"))
@@ -1384,6 +1435,8 @@ mod tests {
         assert!(pending.is_empty());
         assert!(!watch_summary.found_non_empty_state);
         assert_eq!(watch_summary.polls, 2);
+        assert_eq!(watch_summary.state_checks, 1);
+        assert_eq!(watch_summary.skipped_unchanged_finality_polls, 1);
         assert_eq!(watch_summary.max_polls, Some(2));
     }
 
@@ -1403,6 +1456,86 @@ mod tests {
         assert!(error
             .to_string()
             .contains("watch_poll_seconds must be greater than zero"));
+    }
+
+    #[tokio::test]
+    async fn watch_finalized_state_checks_again_when_finalized_slot_advances() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let first_finality_json = format!(
+            r#"{{
+                "data": {{
+                    "previous_justified": {{
+                        "epoch": "98",
+                        "root": "0x{root}"
+                    }},
+                    "current_justified": {{
+                        "epoch": "99",
+                        "root": "0x{root}"
+                    }},
+                    "finalized": {{
+                        "epoch": "101",
+                        "root": "0x{root}"
+                    }}
+                }}
+            }}"#,
+            root = "11".repeat(32)
+        );
+        let second_finalized_slot = 101 * SLOTS_PER_EPOCH;
+        let second_response_json = r#"{
+            "data": [
+                {"source_index": "7", "target_index": "9"}
+            ]
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/states/head/finality_checkpoints"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(first_finality_json))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/eth/v1/beacon/states/{}/pending_consolidations",
+                100 * SLOTS_PER_EPOCH
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data": []}"#))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/eth/v1/beacon/states/{second_finalized_slot}/pending_consolidations"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string(second_response_json))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "1",
+            "--watch-max-polls",
+            "3",
+        ]);
+        let client = BeaconClient::new(mock_server.uri());
+
+        let (resolved_slot, pending, watch_summary, finality) =
+            watch_finalized_state(&args, &client, &sample_finality(100))
+                .await
+                .unwrap();
+
+        assert_eq!(resolved_slot, second_finalized_slot);
+        assert_eq!(finality.finalized_epoch, 101);
+        assert_eq!(pending.len(), 1);
+        assert!(watch_summary.found_non_empty_state);
+        assert_eq!(watch_summary.polls, 2);
+        assert_eq!(watch_summary.state_checks, 2);
+        assert_eq!(watch_summary.skipped_unchanged_finality_polls, 0);
     }
 
     #[tokio::test]
