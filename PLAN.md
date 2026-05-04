@@ -1206,3 +1206,18 @@ This is the final validation before mainnet deployment.
   - resumed checking once finalized slot advances
 - Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the de-duplicated watch behavior.
 - Next practical move stays the same: keep a finalized watch running against the SSH-tunneled internal node and wait for an actual consolidation-bearing state.
+
+**2026-05-04 (hourly check):** Step 18 watch mode made observable during long live-capture runs
+- Added `--watch-progress-output <file>` to `fetch-and-prove`.
+- The watcher now overwrites a small JSON progress snapshot after every poll, including:
+  - `polls`
+  - `state_checks`
+  - `skipped_unchanged_finality_polls`
+  - latest `resolved_slot` / `resolved_epoch`
+  - current `pending_consolidations`
+  - whether a non-empty state has been found yet
+- This makes long-running finalized watches monitorable from cron / a second shell instead of staying silent until exit.
+- Added unit coverage for progress snapshot persistence and extended watch-mode assertions for the richer summary fields.
+- **Verification:** `cargo fmt --all` ✅, `cargo test -p real-chain-test` ✅ (35 tests), `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test` ✅ (**126 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 35 real-chain-test)
+- Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
+- Next practical move: run `cargo run -p real-chain-test -- --beacon-url http://127.0.0.1:14000 --state-id finalized --watch-finalized --watch-poll-seconds 80 --watch-progress-output /tmp/real-chain-watch.json` over the SSH tunnel and let it camp until the chain finally coughs up a pending consolidation.

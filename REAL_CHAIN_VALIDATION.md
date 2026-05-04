@@ -31,6 +31,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-05-03 update:** watch mode now skips redundant `pending_consolidations` fetches when the finalized slot has not advanced yet. Same live capture path, less RPC wood-chipper behavior.
 
+**2026-05-04 update:** `--watch-finalized` can now also persist per-poll progress JSON via `--watch-progress-output <file>`. That makes long capture sessions observable from cron / a second shell instead of staying mute until they exit.
+
 ## Test Results
 
 ### Connection Details
@@ -85,7 +87,7 @@ BEACON_API_URL=http://localhost:15052 cargo run --example test_scanner
 3. **EIP-7251 is active** — Electra endpoints available on Gnosis
 4. **No consolidations yet** — Program will have no claims initially (expected)
 5. **Historical state retention is now a real infrastructure blocker** — this node can answer current finalized-state queries, but not arbitrary older finalized-state queries needed for archaeology
-6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query; the finalized watch mode covers the second part by letting us grab the current finalized state live before it ages out, and it now avoids redundant re-queries while finality is unchanged.
+6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query; the finalized watch mode covers the second part by letting us grab the current finalized state live before it ages out, it now avoids redundant re-queries while finality is unchanged, and it can persist per-poll progress JSON so long watches are observable.
 
 ## Access Setup for Production
 
