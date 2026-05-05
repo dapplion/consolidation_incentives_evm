@@ -1221,3 +1221,15 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo test -p real-chain-test` ✅ (35 tests), `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test` ✅ (**126 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 35 real-chain-test)
 - Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
 - Next practical move: run `cargo run -p real-chain-test -- --beacon-url http://127.0.0.1:14000 --state-id finalized --watch-finalized --watch-poll-seconds 80 --watch-progress-output /tmp/real-chain-watch.json` over the SSH tunnel and let it camp until the chain finally coughs up a pending consolidation.
+
+**2026-05-05 (hourly check):** Step 18 watch snapshots now expose terminal state explicitly
+- Extended `fetch-and-prove` watch progress snapshots with:
+  - `status: polling|found_non_empty_state|max_polls_reached`
+  - `terminal: bool`
+- Added a small `build_watch_summary(...)` helper so terminal-state semantics live in one place instead of being reconstructed ad hoc in two branches.
+- This makes cron/sidecar monitoring less dumb: progress readers can now distinguish “still polling” from “finished cleanly” without inferring it from `polls`, `max_polls`, and the presence/absence of a hit like some sad little detective.
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the richer progress JSON.
+- Added unit/integration coverage for polling, hit, and max-poll terminal states.
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**127 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 36 real-chain-test)
+- Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
+- Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.

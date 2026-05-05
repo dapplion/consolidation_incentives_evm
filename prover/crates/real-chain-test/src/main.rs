@@ -413,6 +413,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum WatchProgressStatus {
+    Polling,
+    FoundNonEmptyState,
+    MaxPollsReached,
+}
+
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 struct WatchSummary {
     polls: usize,
@@ -424,6 +432,8 @@ struct WatchSummary {
     resolved_epoch: u64,
     found_non_empty_state: bool,
     pending_consolidations: usize,
+    status: WatchProgressStatus,
+    terminal: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -622,6 +632,31 @@ async fn resolve_target_state(
     ))
 }
 
+fn build_watch_summary(
+    args: &Args,
+    polls: usize,
+    state_checks: usize,
+    skipped_unchanged_finality_polls: usize,
+    finality: &FinalityCheckpoints,
+    pending_consolidations: usize,
+    status: WatchProgressStatus,
+) -> WatchSummary {
+    let resolved_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
+    WatchSummary {
+        polls,
+        state_checks,
+        skipped_unchanged_finality_polls,
+        poll_interval_seconds: args.watch_poll_seconds,
+        max_polls: args.watch_max_polls,
+        resolved_slot,
+        resolved_epoch: finality.finalized_epoch,
+        found_non_empty_state: pending_consolidations > 0,
+        pending_consolidations,
+        terminal: status != WatchProgressStatus::Polling,
+        status,
+    }
+}
+
 async fn watch_finalized_state(
     args: &Args,
     client: &BeaconClient,
@@ -668,17 +703,19 @@ async fn watch_finalized_state(
                 finality.finalized_epoch,
             );
 
-            let watch_summary = WatchSummary {
+            let watch_summary = build_watch_summary(
+                args,
                 polls,
                 state_checks,
                 skipped_unchanged_finality_polls,
-                poll_interval_seconds: args.watch_poll_seconds,
-                max_polls: args.watch_max_polls,
-                resolved_slot: finalized_slot,
-                resolved_epoch: finality.finalized_epoch,
-                found_non_empty_state: false,
-                pending_consolidations: 0,
-            };
+                &finality,
+                0,
+                if args.watch_max_polls.is_some_and(|limit| polls >= limit) {
+                    WatchProgressStatus::MaxPollsReached
+                } else {
+                    WatchProgressStatus::Polling
+                },
+            );
             write_watch_progress(
                 &args.beacon_url,
                 &args.state_id,
@@ -713,17 +750,21 @@ async fn watch_finalized_state(
             pending_consolidations.len()
         );
 
-        let watch_summary = WatchSummary {
+        let watch_summary = build_watch_summary(
+            args,
             polls,
             state_checks,
             skipped_unchanged_finality_polls,
-            poll_interval_seconds: args.watch_poll_seconds,
-            max_polls: args.watch_max_polls,
-            resolved_slot: finalized_slot,
-            resolved_epoch: finality.finalized_epoch,
-            found_non_empty_state: !pending_consolidations.is_empty(),
-            pending_consolidations: pending_consolidations.len(),
-        };
+            &finality,
+            pending_consolidations.len(),
+            if !pending_consolidations.is_empty() {
+                WatchProgressStatus::FoundNonEmptyState
+            } else if args.watch_max_polls.is_some_and(|limit| polls >= limit) {
+                WatchProgressStatus::MaxPollsReached
+            } else {
+                WatchProgressStatus::Polling
+            },
+        );
         write_watch_progress(
             &args.beacon_url,
             &args.state_id,
@@ -1350,6 +1391,52 @@ mod tests {
     }
 
     #[test]
+    fn build_watch_summary_marks_terminal_states() {
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "80",
+            "--watch-max-polls",
+            "5",
+        ]);
+        let finality = sample_finality(20);
+
+        let polling =
+            build_watch_summary(&args, 1, 1, 0, &finality, 0, WatchProgressStatus::Polling);
+        assert_eq!(polling.resolved_slot, 20 * SLOTS_PER_EPOCH);
+        assert!(!polling.terminal);
+        assert_eq!(polling.status, WatchProgressStatus::Polling);
+        assert!(!polling.found_non_empty_state);
+
+        let hit = build_watch_summary(
+            &args,
+            2,
+            2,
+            0,
+            &finality,
+            3,
+            WatchProgressStatus::FoundNonEmptyState,
+        );
+        assert!(hit.terminal);
+        assert_eq!(hit.status, WatchProgressStatus::FoundNonEmptyState);
+        assert!(hit.found_non_empty_state);
+
+        let exhausted = build_watch_summary(
+            &args,
+            5,
+            3,
+            2,
+            &finality,
+            0,
+            WatchProgressStatus::MaxPollsReached,
+        );
+        assert!(exhausted.terminal);
+        assert_eq!(exhausted.status, WatchProgressStatus::MaxPollsReached);
+        assert_eq!(exhausted.max_polls, Some(5));
+    }
+
+    #[test]
     fn scan_hit_serialization_is_stable() {
         let hit = ScanHit {
             requested_slot: 124,
@@ -1379,6 +1466,8 @@ mod tests {
             resolved_epoch: 20,
             found_non_empty_state: false,
             pending_consolidations: 0,
+            status: WatchProgressStatus::Polling,
+            terminal: false,
         };
 
         write_watch_progress(
@@ -1396,6 +1485,8 @@ mod tests {
         assert_eq!(json["watch_summary"]["polls"], 3);
         assert_eq!(json["watch_summary"]["resolved_epoch"], 20);
         assert_eq!(json["watch_summary"]["pending_consolidations"], 0);
+        assert_eq!(json["watch_summary"]["status"], "polling");
+        assert_eq!(json["watch_summary"]["terminal"], false);
 
         std::fs::remove_file(output).unwrap();
     }
@@ -1454,6 +1545,11 @@ mod tests {
         assert_eq!(watch_summary.max_polls, None);
         assert_eq!(watch_summary.resolved_epoch, 100);
         assert_eq!(watch_summary.pending_consolidations, 1);
+        assert_eq!(
+            watch_summary.status,
+            WatchProgressStatus::FoundNonEmptyState
+        );
+        assert!(watch_summary.terminal);
     }
 
     #[tokio::test]
@@ -1522,6 +1618,8 @@ mod tests {
         assert_eq!(watch_summary.max_polls, Some(2));
         assert_eq!(watch_summary.resolved_epoch, 100);
         assert_eq!(watch_summary.pending_consolidations, 0);
+        assert_eq!(watch_summary.status, WatchProgressStatus::MaxPollsReached);
+        assert!(watch_summary.terminal);
     }
 
     #[tokio::test]
@@ -1622,6 +1720,11 @@ mod tests {
         assert_eq!(watch_summary.skipped_unchanged_finality_polls, 0);
         assert_eq!(watch_summary.resolved_epoch, 101);
         assert_eq!(watch_summary.pending_consolidations, 1);
+        assert_eq!(
+            watch_summary.status,
+            WatchProgressStatus::FoundNonEmptyState
+        );
+        assert!(watch_summary.terminal);
     }
 
     #[tokio::test]
