@@ -10,6 +10,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::time::{sleep, Duration};
 
@@ -430,6 +431,7 @@ struct WatchSummary {
     max_polls: Option<usize>,
     resolved_slot: u64,
     resolved_epoch: u64,
+    finalized_root: String,
     found_non_empty_state: bool,
     pending_consolidations: usize,
     status: WatchProgressStatus,
@@ -440,6 +442,8 @@ struct WatchSummary {
 struct WatchProgressSnapshot {
     beacon_node: String,
     requested_state_id: String,
+    updated_at_unix: u64,
+    updated_at_rfc3339: String,
     watch_summary: WatchSummary,
 }
 
@@ -650,6 +654,7 @@ fn build_watch_summary(
         max_polls: args.watch_max_polls,
         resolved_slot,
         resolved_epoch: finality.finalized_epoch,
+        finalized_root: format!("0x{}", hex::encode(finality.finalized_root)),
         found_non_empty_state: pending_consolidations > 0,
         pending_consolidations,
         terminal: status != WatchProgressStatus::Polling,
@@ -804,9 +809,12 @@ fn write_watch_progress(
         return Ok(());
     };
 
+    let updated_at = watch_snapshot_timestamp()?;
     let snapshot = WatchProgressSnapshot {
         beacon_node: beacon_node.to_string(),
         requested_state_id: requested_state_id.to_string(),
+        updated_at_unix: updated_at,
+        updated_at_rfc3339: format_unix_timestamp(updated_at),
         watch_summary: watch_summary.clone(),
     };
 
@@ -996,6 +1004,21 @@ fn min_hit_slot(non_empty_slots: &[ScanHit]) -> Option<u64> {
 
 fn max_hit_slot(non_empty_slots: &[ScanHit]) -> Option<u64> {
     non_empty_slots.iter().map(|hit| hit.slot).max()
+}
+
+fn watch_snapshot_timestamp() -> Result<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before UNIX_EPOCH")?
+        .as_secs())
+}
+
+fn format_unix_timestamp(timestamp: u64) -> String {
+    use chrono::{DateTime, Utc};
+
+    DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| format!("unix:{timestamp}"))
 }
 
 fn build_consolidation_snapshot(
@@ -1405,6 +1428,7 @@ mod tests {
         let polling =
             build_watch_summary(&args, 1, 1, 0, &finality, 0, WatchProgressStatus::Polling);
         assert_eq!(polling.resolved_slot, 20 * SLOTS_PER_EPOCH);
+        assert_eq!(polling.finalized_root, format!("0x{}", "11".repeat(32)));
         assert!(!polling.terminal);
         assert_eq!(polling.status, WatchProgressStatus::Polling);
         assert!(!polling.found_non_empty_state);
@@ -1464,6 +1488,7 @@ mod tests {
             max_polls: Some(5),
             resolved_slot: 320,
             resolved_epoch: 20,
+            finalized_root: format!("0x{}", "22".repeat(32)),
             found_non_empty_state: false,
             pending_consolidations: 0,
             status: WatchProgressStatus::Polling,
@@ -1482,8 +1507,14 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&output).unwrap()).unwrap();
         assert_eq!(json["beacon_node"], "http://127.0.0.1:14000");
         assert_eq!(json["requested_state_id"], "finalized");
+        assert!(json["updated_at_unix"].as_u64().is_some());
+        assert!(json["updated_at_rfc3339"].as_str().is_some());
         assert_eq!(json["watch_summary"]["polls"], 3);
         assert_eq!(json["watch_summary"]["resolved_epoch"], 20);
+        assert_eq!(
+            json["watch_summary"]["finalized_root"],
+            format!("0x{}", "22".repeat(32))
+        );
         assert_eq!(json["watch_summary"]["pending_consolidations"], 0);
         assert_eq!(json["watch_summary"]["status"], "polling");
         assert_eq!(json["watch_summary"]["terminal"], false);
@@ -1498,6 +1529,11 @@ mod tests {
             finalized_epoch: epoch,
             finalized_root: [0x11; 32],
         }
+    }
+
+    #[test]
+    fn format_unix_timestamp_emits_rfc3339() {
+        assert_eq!(format_unix_timestamp(0), "1970-01-01T00:00:00+00:00");
     }
 
     #[tokio::test]

@@ -1233,3 +1233,15 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (**127 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 36 real-chain-test)
 - Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
 - Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.
+
+**2026-05-06 (hourly check):** Step 18 watch snapshots now include freshness + checkpoint identity
+- Extended `fetch-and-prove` watch progress snapshots with:
+  - `updated_at_unix`
+  - `updated_at_rfc3339`
+  - `watch_summary.finalized_root`
+- This makes sidecar/cron monitoring less blind: a watcher progress file now tells you **when** it was last refreshed and **which finalized checkpoint** it represents, instead of forcing separate log correlation.
+- Added unit coverage for RFC3339 formatting and the richer persisted JSON shape.
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the extra progress fields.
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**128 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 37 real-chain-test)
+- Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
+- Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.
