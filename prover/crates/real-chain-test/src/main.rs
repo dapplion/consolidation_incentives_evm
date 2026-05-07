@@ -420,6 +420,7 @@ enum WatchProgressStatus {
     Polling,
     FoundNonEmptyState,
     MaxPollsReached,
+    Error,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -436,6 +437,7 @@ struct WatchSummary {
     pending_consolidations: usize,
     status: WatchProgressStatus,
     terminal: bool,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -659,7 +661,15 @@ fn build_watch_summary(
         pending_consolidations,
         terminal: status != WatchProgressStatus::Polling,
         status,
+        error: None,
     }
+}
+
+fn with_watch_error(mut watch_summary: WatchSummary, error: impl Into<String>) -> WatchSummary {
+    watch_summary.status = WatchProgressStatus::Error;
+    watch_summary.terminal = true;
+    watch_summary.error = Some(error.into());
+    watch_summary
 }
 
 async fn watch_finalized_state(
@@ -687,16 +697,40 @@ async fn watch_finalized_state(
     let mut state_checks = 0usize;
     let mut skipped_unchanged_finality_polls = 0usize;
     let mut last_checked_finalized_slot = None;
+    let mut last_known_finality = initial_finality.clone();
 
     loop {
         let finality = if polls == 0 {
             initial_finality.clone()
         } else {
-            client
-                .get_finality_checkpoints()
-                .await
-                .context("Failed to refresh finality checkpoints during watch")?
+            match client.get_finality_checkpoints().await {
+                Ok(finality) => finality,
+                Err(error) => {
+                    let error_message =
+                        format!("Failed to refresh finality checkpoints during watch: {error}");
+                    let watch_summary = with_watch_error(
+                        build_watch_summary(
+                            args,
+                            polls,
+                            state_checks,
+                            skipped_unchanged_finality_polls,
+                            &last_known_finality,
+                            0,
+                            WatchProgressStatus::Polling,
+                        ),
+                        error_message.clone(),
+                    );
+                    write_watch_progress(
+                        &args.beacon_url,
+                        &args.state_id,
+                        &watch_summary,
+                        args.watch_progress_output.as_deref(),
+                    )?;
+                    return Err(anyhow::anyhow!(error_message));
+                }
+            }
         };
+        last_known_finality = finality.clone();
         let finalized_slot = finality.finalized_epoch * SLOTS_PER_EPOCH;
         polls += 1;
 
@@ -736,15 +770,37 @@ async fn watch_finalized_state(
             continue;
         }
 
-        let pending_consolidations = client
+        let pending_consolidations = match client
             .get_pending_consolidations(&finalized_slot.to_string())
             .await
-            .with_context(|| {
-                format!(
-                    "Failed to fetch pending consolidations for finalized slot {} during watch",
+        {
+            Ok(pending_consolidations) => pending_consolidations,
+            Err(error) => {
+                let error_message = format!(
+                    "Failed to fetch pending consolidations for finalized slot {} during watch: {error}",
                     finalized_slot
-                )
-            })?;
+                );
+                let watch_summary = with_watch_error(
+                    build_watch_summary(
+                        args,
+                        polls,
+                        state_checks,
+                        skipped_unchanged_finality_polls,
+                        &finality,
+                        0,
+                        WatchProgressStatus::Polling,
+                    ),
+                    error_message.clone(),
+                );
+                write_watch_progress(
+                    &args.beacon_url,
+                    &args.state_id,
+                    &watch_summary,
+                    args.watch_progress_output.as_deref(),
+                )?;
+                return Err(anyhow::anyhow!(error_message));
+            }
+        };
         last_checked_finalized_slot = Some(finalized_slot);
         state_checks += 1;
 
@@ -1432,6 +1488,7 @@ mod tests {
         assert!(!polling.terminal);
         assert_eq!(polling.status, WatchProgressStatus::Polling);
         assert!(!polling.found_non_empty_state);
+        assert_eq!(polling.error, None);
 
         let hit = build_watch_summary(
             &args,
@@ -1445,6 +1502,7 @@ mod tests {
         assert!(hit.terminal);
         assert_eq!(hit.status, WatchProgressStatus::FoundNonEmptyState);
         assert!(hit.found_non_empty_state);
+        assert_eq!(hit.error, None);
 
         let exhausted = build_watch_summary(
             &args,
@@ -1458,6 +1516,15 @@ mod tests {
         assert!(exhausted.terminal);
         assert_eq!(exhausted.status, WatchProgressStatus::MaxPollsReached);
         assert_eq!(exhausted.max_polls, Some(5));
+        assert_eq!(exhausted.error, None);
+
+        let errored = with_watch_error(
+            build_watch_summary(&args, 2, 1, 1, &finality, 0, WatchProgressStatus::Polling),
+            "boom",
+        );
+        assert!(errored.terminal);
+        assert_eq!(errored.status, WatchProgressStatus::Error);
+        assert_eq!(errored.error.as_deref(), Some("boom"));
     }
 
     #[test]
@@ -1493,6 +1560,7 @@ mod tests {
             pending_consolidations: 0,
             status: WatchProgressStatus::Polling,
             terminal: false,
+            error: None,
         };
 
         write_watch_progress(
@@ -1518,6 +1586,7 @@ mod tests {
         assert_eq!(json["watch_summary"]["pending_consolidations"], 0);
         assert_eq!(json["watch_summary"]["status"], "polling");
         assert_eq!(json["watch_summary"]["terminal"], false);
+        assert!(json["watch_summary"]["error"].is_null());
 
         std::fs::remove_file(output).unwrap();
     }
@@ -1586,6 +1655,56 @@ mod tests {
             WatchProgressStatus::FoundNonEmptyState
         );
         assert!(watch_summary.terminal);
+    }
+
+    #[tokio::test]
+    async fn watch_finalized_state_writes_terminal_error_progress_snapshot() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let finalized_slot = 100 * SLOTS_PER_EPOCH;
+        let output =
+            std::env::temp_dir().join(format!("watch-progress-error-{}.json", std::process::id()));
+
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/eth/v1/beacon/states/{finalized_slot}/pending_consolidations"
+            )))
+            .respond_with(ResponseTemplate::new(500).set_body_string("nope"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let args = Args::parse_from([
+            "fetch-and-prove",
+            "--watch-finalized",
+            "--watch-poll-seconds",
+            "1",
+            "--watch-progress-output",
+            output.to_str().unwrap(),
+        ]);
+        let client = BeaconClient::new(mock_server.uri());
+
+        let error = watch_finalized_state(&args, &client, &sample_finality(100))
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Failed to fetch pending consolidations for finalized slot"));
+
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&output).unwrap()).unwrap();
+        assert_eq!(json["watch_summary"]["status"], "error");
+        assert_eq!(json["watch_summary"]["terminal"], true);
+        assert!(json["watch_summary"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Failed to fetch pending consolidations for finalized slot"));
+        assert_eq!(json["watch_summary"]["polls"], 1);
+        assert_eq!(json["watch_summary"]["state_checks"], 0);
+
+        std::fs::remove_file(output).unwrap();
     }
 
     #[tokio::test]

@@ -33,7 +33,7 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-05-04 update:** `--watch-finalized` can now also persist per-poll progress JSON via `--watch-progress-output <file>`. That makes long capture sessions observable from cron / a second shell instead of staying mute until they exit.
 
-**2026-05-05 update:** watch-progress snapshots now expose explicit watcher state (`status: polling|found_non_empty_state|max_polls_reached` plus `terminal: bool`). That removes guesswork for cron/sidecar monitoring — no more inferring “did it finish or just stall?” from raw poll counters like cave paintings.
+**2026-05-05 update:** watch-progress snapshots now expose explicit watcher state (`status: polling|found_non_empty_state|max_polls_reached|error` plus `terminal: bool`). That removes guesswork for cron/sidecar monitoring — no more inferring “did it finish or just stall?” from raw poll counters like cave paintings, and API faceplants now leave an obvious tombstone instead of silent disappointment.
 
 **2026-05-06 update:** watch-progress snapshots now also include refresh timestamps (`updated_at_unix`, `updated_at_rfc3339`) and the current `finalized_root`. That makes sidecar/cron monitoring less lossy: you can see when the file was last refreshed and which finalized checkpoint the watcher is describing without correlating separate logs.
 

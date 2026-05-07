@@ -1245,3 +1245,17 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (**128 Rust tests passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 37 real-chain-test)
 - Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
 - Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.
+
+**2026-05-07 (hourly check):** Step 18 watch snapshots now persist terminal API failures
+- Extended `fetch-and-prove --watch-finalized` progress snapshots with:
+  - `status: error`
+  - `watch_summary.error` (human-readable failure text)
+- Watch mode now writes a final JSON tombstone before returning when:
+  - finality checkpoint refresh fails
+  - finalized-slot `pending_consolidations` fetch fails
+- This closes an annoying observability hole for long-running live capture: cron/sidecar monitors can now distinguish “still polling” from “the beacon API just exploded and the watcher died.”
+- Added direct coverage for terminal error snapshot persistence.
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the new failure-state JSON.
+- **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (Rust suite now **129 passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 38 real-chain-test)
+- Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
+- Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.
