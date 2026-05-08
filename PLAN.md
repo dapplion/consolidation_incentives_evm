@@ -1259,3 +1259,11 @@ This is the final validation before mainnet deployment.
 - **Verification:** `cargo fmt --all` ✅, `cargo clippy -p real-chain-test --all-targets -- -D warnings` ✅, `cargo test -p real-chain-test` ✅, `cargo test` ✅ (Rust suite now **129 passing**: 18 service + 3 devnet-plan + 12 integration + 58 proof-gen + 38 real-chain-test)
 - Solidity tests still cannot be run in this environment because `forge` is not installed on PATH; historical baseline remains 68 passing.
 - Next practical move remains the same: keep a finalized watch running over the SSH tunnel until the chain finally produces a non-empty pending-consolidations state.
+
+**2026-05-08 (hourly check):** Step 18 watch mode now keeps history instead of one overwrite-only breadcrumb
+- Added `--watch-event-log-output <file>` to `fetch-and-prove`
+- Watch mode now appends one JSON object per poll/terminal state to a JSONL file, while still maintaining the latest-state snapshot via `--watch-progress-output`
+- This makes long live-capture runs auditable after the fact instead of forcing postmortems off a single overwritten file like some cursed Etch A Sketch
+- Added unit coverage verifying event-log appends preserve multiple snapshots while the plain progress snapshot still tracks only the latest state
+- Updated `REAL_CHAIN_TESTING.md` and `REAL_CHAIN_VALIDATION.md` to document the new event-log workflow
+- **Verification target:** `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test`

@@ -29,6 +29,7 @@
   - a live finalized-state watcher (`--watch-finalized`, with `--watch-poll-seconds` / `--watch-max-polls`) for catching the first non-empty state before historical retention eats the evidence
   - watch-mode deduplication: if finalized head has not advanced yet, the watcher skips the redundant `pending_consolidations` fetch instead of hammering the same finalized slot over and over
   - optional progress snapshots during `--watch-finalized` via `--watch-progress-output <file>`, so long-running live capture sessions leave inspectable JSON breadcrumbs after every poll instead of being silent until exit
+  - optional append-only watch event logs via `--watch-event-log-output <file>`, so long-running capture sessions keep a poll-by-poll JSONL trail instead of overwriting history with a single latest snapshot
   - explicit watch progress state in those JSON snapshots (`status: polling|found_non_empty_state|max_polls_reached|error` plus `terminal: bool`), so cron/sidecar monitors can tell whether the watcher is still waiting, finished cleanly, or died noisily without reverse-engineering the counters
   - timestamped watch snapshots (`updated_at_unix`, `updated_at_rfc3339`) plus the current `finalized_root`, so external monitors can tell exactly when a progress file was refreshed and which finalized checkpoint it represents
 
@@ -95,9 +96,10 @@ This step requires:
 2. Use `fetch-and-prove --scan-last-epochs <N> --scan-step-slots 16 --scan-direction reverse --scan-hit-limit <N>` against the internal node for a quick recent-history sweep, or fall back to `--scan-start-epoch <epoch> --scan-end-epoch <epoch>` / slot flags when you need a precise archaeology window. The emitted scan window now includes both slot and epoch breadcrumbs (`start_epoch`, `end_epoch`, `first_non_empty_epoch`, `last_non_empty_epoch`, plus per-hit epochs), and each hit records both the original `requested_slot` and the resolved `slot` used after missed-slot fallback.
 3. When archaeology fails because history is pruned, switch to live capture instead of arguing with the node: `fetch-and-prove --state-id finalized --watch-finalized --watch-poll-seconds 80` (optionally add `--watch-max-polls <N>` if you want it to stop on its own). The watcher now skips duplicate finalized slots automatically, so shorter poll cadences no longer spam redundant state requests while finality is unchanged.
 4. If you want observability during a long watch, add `--watch-progress-output /tmp/real-chain-watch.json` and tail that file from cron / another shell. It records refresh timestamps (`updated_at_unix`, `updated_at_rfc3339`), poll count, state checks, skipped duplicate-finality polls, the latest finalized slot+epoch+root, the current pending-consolidation count after each poll, and an explicit `status`/`terminal` pair plus optional `error` text so downstream automation knows whether the watcher is still polling, exited cleanly, or faceplanted on an API failure.
-5. If the scan fails with `beacon header exists ... but beacon state is unavailable`, stop blaming the scanner — that's the node refusing historical state lookups, not a missed-slot issue. Use a non-pruning node or wait to capture the state live.
-6. Generate a real proof bundle once such a state is found
-7. Deploy contract to local Anvil fork with real beacon roots
-8. Submit claims with real proofs to verify end-to-end flow
-9. Deploy to Chiado testnet for live testing
-10. Deploy to Gnosis mainnet
+5. If you want a full audit trail instead of just the latest state, also add `--watch-event-log-output /tmp/real-chain-watch.jsonl`. Each poll/exit appends one JSON object per line using the same schema as the progress snapshot, which is much nicer for postmortems and dumb little shell parsers. Do not point it at the same file as `--watch-progress-output` unless you enjoy corrupting both views at once.
+6. If the scan fails with `beacon header exists ... but beacon state is unavailable`, stop blaming the scanner — that's the node refusing historical state lookups, not a missed-slot issue. Use a non-pruning node or wait to capture the state live.
+7. Generate a real proof bundle once such a state is found
+8. Deploy contract to local Anvil fork with real beacon roots
+9. Submit claims with real proofs to verify end-to-end flow
+10. Deploy to Chiado testnet for live testing
+11. Deploy to Gnosis mainnet

@@ -37,6 +37,8 @@ Successfully validated all scanner components against live Gnosis beacon chain d
 
 **2026-05-06 update:** watch-progress snapshots now also include refresh timestamps (`updated_at_unix`, `updated_at_rfc3339`) and the current `finalized_root`. That makes sidecar/cron monitoring less lossy: you can see when the file was last refreshed and which finalized checkpoint the watcher is describing without correlating separate logs.
 
+**2026-05-08 update:** watch mode can now also append an event log via `--watch-event-log-output <file>`. The existing progress snapshot is still the easy “what’s happening right now?” view, while the JSONL log preserves every poll/terminal state for postmortems and external automation that wants history instead of a single overwritten file.
+
 ## Test Results
 
 ### Connection Details
@@ -91,7 +93,7 @@ BEACON_API_URL=http://localhost:15052 cargo run --example test_scanner
 3. **EIP-7251 is active** — Electra endpoints available on Gnosis
 4. **No consolidations yet** — Program will have no claims initially (expected)
 5. **Historical state retention is now a real infrastructure blocker** — this node can answer current finalized-state queries, but not arbitrary older finalized-state queries needed for archaeology
-6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query; the finalized watch mode covers the second part by letting us grab the current finalized state live before it ages out, it now avoids redundant re-queries while finality is unchanged, and it can persist per-poll progress JSON with explicit `status` / `terminal` fields, refresh timestamps, and finalized-root metadata so long watches are observable without guesswork.
+6. **Remaining blocker is now twofold** — we need both (a) a state with at least one pending consolidation and (b) access to that state on a node that actually retains it long enough to query; the finalized watch mode covers the second part by letting us grab the current finalized state live before it ages out, it now avoids redundant re-queries while finality is unchanged, and it can persist both per-poll progress JSON plus an append-only JSONL event log with explicit `status` / `terminal` fields, refresh timestamps, and finalized-root metadata so long watches are observable without guesswork or amnesia.
 
 ## Access Setup for Production
 

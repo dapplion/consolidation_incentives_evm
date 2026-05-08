@@ -8,7 +8,10 @@ use proof_gen::{
 use ssz_rs::HashTreeRoot;
 use std::{
     collections::BTreeMap,
-    fs,
+    env, fs,
+    fs::OpenOptions,
+    io::Write,
+    path::Component,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -88,6 +91,11 @@ struct Args {
     /// Handy for long-running capture sessions where you want observability before a hit appears.
     #[arg(long)]
     watch_progress_output: Option<PathBuf>,
+
+    /// When watching finalized head, also append each progress snapshot as one JSON line.
+    /// Useful when you want a full poll-by-poll event trail instead of only the latest state.
+    #[arg(long)]
+    watch_event_log_output: Option<PathBuf>,
 
     /// Maximum number of pending consolidations to inspect in detail
     #[arg(long, default_value_t = 25)]
@@ -725,6 +733,7 @@ async fn watch_finalized_state(
                         &args.state_id,
                         &watch_summary,
                         args.watch_progress_output.as_deref(),
+                        args.watch_event_log_output.as_deref(),
                     )?;
                     return Err(anyhow::anyhow!(error_message));
                 }
@@ -760,6 +769,7 @@ async fn watch_finalized_state(
                 &args.state_id,
                 &watch_summary,
                 args.watch_progress_output.as_deref(),
+                args.watch_event_log_output.as_deref(),
             )?;
 
             if args.watch_max_polls.is_some_and(|limit| polls >= limit) {
@@ -797,6 +807,7 @@ async fn watch_finalized_state(
                     &args.state_id,
                     &watch_summary,
                     args.watch_progress_output.as_deref(),
+                    args.watch_event_log_output.as_deref(),
                 )?;
                 return Err(anyhow::anyhow!(error_message));
             }
@@ -831,6 +842,7 @@ async fn watch_finalized_state(
             &args.state_id,
             &watch_summary,
             args.watch_progress_output.as_deref(),
+            args.watch_event_log_output.as_deref(),
         )?;
 
         if !pending_consolidations.is_empty() {
@@ -860,10 +872,18 @@ fn write_watch_progress(
     requested_state_id: &str,
     watch_summary: &WatchSummary,
     output: Option<&Path>,
+    event_log_output: Option<&Path>,
 ) -> Result<()> {
-    let Some(output) = output else {
+    if output.is_none() && event_log_output.is_none() {
         return Ok(());
-    };
+    }
+
+    if let (Some(output), Some(event_log_output)) = (output, event_log_output) {
+        anyhow::ensure!(
+            !paths_alias(output, event_log_output)?,
+            "watch_progress_output and watch_event_log_output must point to different files"
+        );
+    }
 
     let updated_at = watch_snapshot_timestamp()?;
     let snapshot = WatchProgressSnapshot {
@@ -874,8 +894,74 @@ fn write_watch_progress(
         watch_summary: watch_summary.clone(),
     };
 
-    fs::write(output, serde_json::to_string_pretty(&snapshot)?)
-        .with_context(|| format!("failed to write {}", output.display()))
+    if let Some(output) = output {
+        fs::write(output, serde_json::to_string_pretty(&snapshot)?)
+            .with_context(|| format!("failed to write {}", output.display()))?;
+    }
+
+    if let Some(event_log_output) = event_log_output {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(event_log_output)
+            .with_context(|| format!("failed to open {}", event_log_output.display()))?;
+        serde_json::to_writer(&mut file, &snapshot).context("failed to serialize watch event")?;
+        writeln!(file).context("failed to append newline to watch event log")?;
+    }
+
+    Ok(())
+}
+
+fn paths_alias(left: &Path, right: &Path) -> Result<bool> {
+    let normalized_left = canonicalize_path_for_comparison(left)?;
+    let normalized_right = canonicalize_path_for_comparison(right)?;
+
+    if normalized_left == normalized_right {
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn canonicalize_path_for_comparison(path: &Path) -> Result<PathBuf> {
+    let normalized = normalize_path_for_comparison(path)?;
+    if normalized.exists() {
+        return fs::canonicalize(&normalized)
+            .with_context(|| format!("failed to canonicalize {}", normalized.display()));
+    }
+
+    if let Some(parent) = normalized.parent() {
+        let canonical_parent = fs::canonicalize(parent)
+            .with_context(|| format!("failed to canonicalize {}", parent.display()))?;
+        if let Some(file_name) = normalized.file_name() {
+            return Ok(canonical_parent.join(file_name));
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_path_for_comparison(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .context("failed to resolve current directory for watch output path")?
+            .join(path)
+    };
+
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+
+    Ok(normalized)
 }
 
 async fn resolve_slot(state_id: &str, finalized_slot: u64, client: &BeaconClient) -> Result<u64> {
@@ -1568,6 +1654,7 @@ mod tests {
             "finalized",
             &watch_summary,
             Some(output.as_path()),
+            None,
         )
         .unwrap();
 
@@ -1589,6 +1676,166 @@ mod tests {
         assert!(json["watch_summary"]["error"].is_null());
 
         std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn write_watch_progress_appends_jsonl_event_log() {
+        let suffix = format!(
+            "{}-{}",
+            std::process::id(),
+            watch_snapshot_timestamp().unwrap()
+        );
+        let snapshot_output = std::env::temp_dir().join(format!("watch-progress-{suffix}.json"));
+        let event_log_output = std::env::temp_dir().join(format!("watch-progress-{suffix}.jsonl"));
+        let watch_summary = WatchSummary {
+            polls: 4,
+            state_checks: 3,
+            skipped_unchanged_finality_polls: 1,
+            poll_interval_seconds: 80,
+            max_polls: Some(9),
+            resolved_slot: 336,
+            resolved_epoch: 21,
+            finalized_root: format!("0x{}", "33".repeat(32)),
+            found_non_empty_state: false,
+            pending_consolidations: 0,
+            status: WatchProgressStatus::Polling,
+            terminal: false,
+            error: None,
+        };
+
+        write_watch_progress(
+            "http://127.0.0.1:14000",
+            "finalized",
+            &watch_summary,
+            Some(snapshot_output.as_path()),
+            Some(event_log_output.as_path()),
+        )
+        .unwrap();
+
+        let mut terminal_summary = watch_summary.clone();
+        terminal_summary.polls = 5;
+        terminal_summary.state_checks = 4;
+        terminal_summary.pending_consolidations = 2;
+        terminal_summary.found_non_empty_state = true;
+        terminal_summary.status = WatchProgressStatus::FoundNonEmptyState;
+        terminal_summary.terminal = true;
+
+        write_watch_progress(
+            "http://127.0.0.1:14000",
+            "finalized",
+            &terminal_summary,
+            Some(snapshot_output.as_path()),
+            Some(event_log_output.as_path()),
+        )
+        .unwrap();
+
+        let lines: Vec<_> = std::fs::read_to_string(&event_log_output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["watch_summary"]["polls"], 4);
+        assert_eq!(lines[0]["watch_summary"]["status"], "polling");
+        assert_eq!(lines[1]["watch_summary"]["polls"], 5);
+        assert_eq!(lines[1]["watch_summary"]["status"], "found_non_empty_state");
+        assert_eq!(lines[1]["watch_summary"]["terminal"], true);
+
+        let latest_snapshot: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&snapshot_output).unwrap()).unwrap();
+        assert_eq!(latest_snapshot["watch_summary"]["polls"], 5);
+        assert_eq!(
+            latest_snapshot["watch_summary"]["pending_consolidations"],
+            2
+        );
+
+        std::fs::remove_file(snapshot_output).unwrap();
+        std::fs::remove_file(event_log_output).unwrap();
+    }
+
+    #[test]
+    fn write_watch_progress_rejects_aliasing_snapshot_and_event_log_paths() {
+        let temp_dir = std::env::temp_dir();
+        let shared_output =
+            temp_dir.join(format!("watch-progress-shared-{}.json", std::process::id()));
+        let aliased_output = temp_dir.join(".").join(shared_output.file_name().unwrap());
+        let watch_summary = WatchSummary {
+            polls: 1,
+            state_checks: 1,
+            skipped_unchanged_finality_polls: 0,
+            poll_interval_seconds: 80,
+            max_polls: None,
+            resolved_slot: 320,
+            resolved_epoch: 20,
+            finalized_root: format!("0x{}", "44".repeat(32)),
+            found_non_empty_state: false,
+            pending_consolidations: 0,
+            status: WatchProgressStatus::Polling,
+            terminal: false,
+            error: None,
+        };
+
+        let error = write_watch_progress(
+            "http://127.0.0.1:14000",
+            "finalized",
+            &watch_summary,
+            Some(shared_output.as_path()),
+            Some(aliased_output.as_path()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(
+            "watch_progress_output and watch_event_log_output must point to different files"
+        ));
+        assert!(!shared_output.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_watch_progress_rejects_symlinked_parent_aliases() {
+        use std::os::unix::fs::symlink;
+
+        let unique = format!(
+            "watch-progress-symlink-{}",
+            watch_snapshot_timestamp().unwrap()
+        );
+        let base_dir = std::env::temp_dir().join(unique);
+        let real_dir = base_dir.join("real");
+        let alias_dir = base_dir.join("alias");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        symlink(&real_dir, &alias_dir).unwrap();
+
+        let shared_output = real_dir.join("watch.json");
+        let aliased_output = alias_dir.join("watch.json");
+        let watch_summary = WatchSummary {
+            polls: 1,
+            state_checks: 1,
+            skipped_unchanged_finality_polls: 0,
+            poll_interval_seconds: 80,
+            max_polls: None,
+            resolved_slot: 320,
+            resolved_epoch: 20,
+            finalized_root: format!("0x{}", "55".repeat(32)),
+            found_non_empty_state: false,
+            pending_consolidations: 0,
+            status: WatchProgressStatus::Polling,
+            terminal: false,
+            error: None,
+        };
+
+        let error = write_watch_progress(
+            "http://127.0.0.1:14000",
+            "finalized",
+            &watch_summary,
+            Some(shared_output.as_path()),
+            Some(aliased_output.as_path()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(
+            "watch_progress_output and watch_event_log_output must point to different files"
+        ));
+        assert!(!shared_output.exists());
+
+        std::fs::remove_dir_all(base_dir).unwrap();
     }
 
     fn sample_finality(epoch: u64) -> FinalityCheckpoints {
